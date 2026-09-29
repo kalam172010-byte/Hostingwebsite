@@ -203,6 +203,12 @@ def db_query(query: str, params: tuple = (), fetchone: bool = False, fetchall: b
     finally:
         conn.close()
 
+def is_admin_user(user_id: int) -> bool:
+    if user_id == ADMIN_ID:
+        return True
+    row = db_query("SELECT is_admin FROM users WHERE user_id = ?", (user_id,), fetchone=True)
+    return bool(row and row[0] == 1)
+
 def get_setting(key: str, default: str = "") -> str:
     val = db_query("SELECT value FROM settings WHERE key=?", (key,), fetchone=True)
     return val[0] if val and val[0] else default
@@ -440,7 +446,9 @@ def init_db() -> None:
     migrations = [
         "ALTER TABLE users ADD COLUMN is_vip INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN vip_since TEXT",
+        "ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0",
         "ALTER TABLE products ADD COLUMN is_active INTEGER DEFAULT 1",
+        "ALTER TABLE products ADD COLUMN is_maintenance INTEGER DEFAULT 0",
         "ALTER TABLE tickets ADD COLUMN created_at TEXT",
         "ALTER TABLE users ADD COLUMN is_banned INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN warnings INTEGER DEFAULT 0",
@@ -1697,26 +1705,45 @@ async def view_shop_panels(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("cat_"))
 async def view_panel_names(call: CallbackQuery):
     category = call.data.split("cat_", 1)[1]
-    panel_names = db_query("SELECT DISTINCT panel_name FROM products WHERE category = ? AND is_active=1 AND panel_name != ''", (category,), fetchall=True)
-    if not panel_names:
+    panel_rows = db_query("SELECT panel_name, MAX(is_maintenance) FROM products WHERE category = ? AND is_active=1 AND panel_name != '' GROUP BY panel_name", (category,), fetchall=True)
+    if not panel_rows:
         prods = db_query("SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category, bantibhaiya_product_pid FROM products WHERE category = ? AND is_active=1", (category,), fetchall=True)
         if not prods: return await call.answer("❌ No products available in this category yet.", show_alert=True)
         await show_products_for_panel(call, prods, category)
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     text = f"{get_emoji('product_store')} <b><u>{category.upper()} PANELS</u></b>\n━━━━━━━━━━━━━━━━━━\n\n{get_emoji('point_down')} <b>Choose a panel name:</b>"
-    for pn in panel_names:
+    for pn in panel_rows:
         panel = pn[0]
+        is_maint = bool(pn[1]) if len(pn) > 1 else False
         emoji_id = get_panel_emoji(panel) or get_emoji_icon("product_store")
-        kb.inline_keyboard.append([InlineKeyboardButton(text=panel, callback_data=f"pnl_{category[:30]}_{panel[:30]}", icon_custom_emoji_id=emoji_id, style="primary")])
+        
+        if is_maint:
+            btn_text = f"🔴 {panel} (Under Maintenance)"
+            kb.inline_keyboard.append([InlineKeyboardButton(text=btn_text, callback_data=f"maint_alert_{category[:30]}_{panel[:30]}", style="danger")])
+        else:
+            kb.inline_keyboard.append([InlineKeyboardButton(text=panel, callback_data=f"pnl_{category[:30]}_{panel[:30]}", icon_custom_emoji_id=emoji_id, style="primary")])
+            
     kb.inline_keyboard.append([InlineKeyboardButton(text="BACK TO PANELS", callback_data="menu_shop", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
     await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("maint_alert_"))
+async def maint_alert_handler(call: CallbackQuery):
+    parts = call.data.split("maint_alert_", 1)[1].split("_", 1)
+    panel_name = parts[1] if len(parts) > 1 else "This panel"
+    await call.answer(f"⚠️ [ {panel_name} ] is currently UNDER MAINTENANCE!\n\nOur team is currently updating this server. Purchases are temporarily disabled. Please check back later!", show_alert=True)
 
 @dp.callback_query(F.data.startswith("pnl_"))
 async def view_products_for_panel(call: CallbackQuery):
     parts = call.data.split("pnl_", 1)[1].split("_", 1)
     if len(parts) != 2: return await call.answer("Invalid selection.", show_alert=True)
     category, panel_name = parts[0], parts[1]
+    
+    # Check maintenance mode
+    maint_check = db_query("SELECT is_maintenance FROM products WHERE category = ? AND panel_name = ? LIMIT 1", (category, panel_name), fetchone=True)
+    if maint_check and maint_check[0] == 1:
+        return await call.answer(f"⚠️ [ {panel_name} ] is currently UNDER MAINTENANCE! Purchases are temporarily disabled.", show_alert=True)
+        
     prods = db_query("SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category, bantibhaiya_product_pid FROM products WHERE category = ? AND panel_name = ? AND is_active=1", (category, panel_name), fetchall=True)
     if not prods: return await call.answer("No products found for this panel.", show_alert=True)
     await show_products_for_panel(call, prods, f"{category} - {panel_name}")
@@ -2034,18 +2061,19 @@ async def process_ticket(m: Message, state: FSMContext):
 # ==============================================================================
 @dp.message(Command("admin"))
 async def admin_panel(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
+    if not is_admin_user(message.from_user.id): return
     await state.clear()
     await message.answer("⚙️ <b>Advanced Admin Terminal</b>\n<i>Authorized Access Granted.</i>", reply_markup=admin_kb(), parse_mode='HTML')
 
 @dp.callback_query(F.data == "admin_panel_back")
 async def back_to_admin(call: CallbackQuery, state: FSMContext):
+    if not is_admin_user(call.from_user.id): return
     await state.clear()
     await call.message.edit_text("⚙️ <b>Advanced Admin Terminal</b>\n<i>Authorized Access Granted.</i>", reply_markup=admin_kb(), parse_mode='HTML')
 
 @dp.callback_query(F.data == "admin_toggle_vip_sys")
 async def toggle_vip_sys(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     res = db_query("SELECT value FROM settings WHERE key='vip_status'", fetchone=True)
     current = res[0] if res else 'OFF'
     new_status = 'ON' if current == 'OFF' else 'OFF'
@@ -2054,135 +2082,299 @@ async def toggle_vip_sys(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_user_control_start")
 async def admin_user_control_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Download Full User List", callback_data="admin_download_userlist", style="success")],
-        [InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+    if not is_admin_user(call.from_user.id): return
+    await state.clear()
+    
+    t_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0] or 0
+    t_resellers = db_query("SELECT COUNT(*) FROM users WHERE is_reseller=1", fetchone=True)[0] or 0
+    t_admins = db_query("SELECT COUNT(*) FROM users WHERE is_admin=1", fetchone=True)[0] or 0
+    t_banned = db_query("SELECT COUNT(*) FROM users WHERE is_banned=1", fetchone=True)[0] or 0
+    
+    recent_users = db_query("SELECT user_id, first_name, username, balance, is_reseller, is_admin FROM users ORDER BY rowid DESC LIMIT 10", fetchall=True)
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    
+    if recent_users:
+        for ru in recent_users:
+            u_id, u_name, u_uname, u_bal, is_res, is_adm = ru
+            role_tag = "👑" if is_res else ("⭐" if is_adm else "👤")
+            disp = f"{role_tag} {u_name[:15]} ({fmt_curr(u_bal)})"
+            kb.inline_keyboard.append([InlineKeyboardButton(text=disp, callback_data=f"usrctrl_view_{u_id}", style="primary")])
+            
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="🔍 Search User (ID/@Username)", callback_data="admin_search_user_prompt", style="success")
     ])
-    await call.message.edit_text("💻 <b>User Control Terminal</b>\n\n✏️ Enter the <b>User ID</b> or <b>@Username</b> you want to investigate or manage:\n\n👇 <b>OR</b> download the full user CSV format list:", reply_markup=kb, parse_mode='HTML')
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text=f"👑 Resellers ({t_resellers})", callback_data="admin_list_resellers", style="primary"),
+        InlineKeyboardButton(text=f"⭐ Admins ({t_admins})", callback_data="admin_list_admins", style="primary")
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="📋 Download Full User List", callback_data="admin_download_userlist", style="primary")
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")
+    ])
+    
+    text = (
+        f"🛡 <b><u>USER MANAGEMENT SUITE</u></b> 🛡\n━━━━━━━━━━━━━━━━━━\n"
+        f"👥 <b>Total Users:</b> {t_users}\n"
+        f"👑 <b>Resellers:</b> {t_resellers} | ⭐ <b>Admins:</b> {t_admins}\n"
+        f"🔴 <b>Banned Users:</b> {t_banned}\n━━━━━━━━━━━━━━━━━━\n"
+        f"👇 <b>Select a Recent User below, or click Search:</b>"
+    )
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data == "admin_search_user_prompt")
+async def admin_search_user_prompt(call: CallbackQuery, state: FSMContext):
+    if not is_admin_user(call.from_user.id): return
+    await call.message.edit_text(
+        "🔍 <b>Search User</b>\n\n"
+        "✏️ Send the <b>Telegram User ID</b> or <b>@username</b> in chat:",
+        reply_markup=admin_back_kb(),
+        parse_mode='HTML'
+    )
     await state.set_state(AdminStates.manage_target_user)
+
+@dp.callback_query(F.data == "admin_list_resellers")
+async def admin_list_resellers(call: CallbackQuery):
+    if not is_admin_user(call.from_user.id): return
+    resellers = db_query("SELECT user_id, first_name, username, balance FROM users WHERE is_reseller=1", fetchall=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    if resellers:
+        for r in resellers:
+            kb.inline_keyboard.append([InlineKeyboardButton(text=f"👑 {r[1]} (@{r[2] or 'no_user'}) - {fmt_curr(r[3])}", callback_data=f"usrctrl_view_{r[0]}", style="primary")])
+    else:
+        kb.inline_keyboard.append([InlineKeyboardButton(text="No Resellers Found", callback_data="none")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Back to Users", callback_data="admin_user_control_start")])
+    await call.message.edit_text("👑 <b><u>ACTIVE WHOLESALE RESELLERS</u></b>\n\nClick any user to manage their balance or roles:", reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data == "admin_list_admins")
+async def admin_list_admins(call: CallbackQuery):
+    if not is_admin_user(call.from_user.id): return
+    admins = db_query("SELECT user_id, first_name, username, balance FROM users WHERE is_admin=1 OR user_id=?", (ADMIN_ID,), fetchall=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    if admins:
+        for a in admins:
+            tag = "🌟 Owner" if a[0] == ADMIN_ID else "⭐ Admin"
+            kb.inline_keyboard.append([InlineKeyboardButton(text=f"{tag}: {a[1]} (@{a[2] or 'no_user'})", callback_data=f"usrctrl_view_{a[0]}", style="primary")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Back to Users", callback_data="admin_user_control_start")])
+    await call.message.edit_text("⭐ <b><u>ADMINISTRATOR TEAM</u></b>\n\nClick any admin to manage privileges:", reply_markup=kb, parse_mode='HTML')
 
 @dp.callback_query(F.data == "admin_download_userlist")
 async def admin_download_userlist(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
-    users = db_query("SELECT username, user_id, phone, balance, orders_count, is_vip, is_reseller FROM users", fetchall=True)
+    if not is_admin_user(call.from_user.id): return
+    users = db_query("SELECT username, user_id, phone, balance, orders_count, is_vip, is_reseller, is_admin FROM users", fetchall=True)
     if not users: return await call.answer("❌ No users found in the database.", show_alert=True)
     file_content = "FULL DATABASE DUMP\n" + "="*100 + "\n"
     for u in users:
         uname = u[0] if u[0] else "No_Username"
         uid = u[1]
         phone = u[2] if u[2] else "No_Phone"
-        bal = u[3]
-        orders = u[4]
+        bal = u[3] or 0.0
+        orders = u[4] or 0
         vip_status = "YES" if u[5] else "NO"
         res_status = "YES" if u[6] else "NO"
-        file_content += f"UID: {uid} | UNAME: {uname} | PHONE: {phone} | BAL: ₹{bal:.2f} | BUY: {orders} | VIP: {vip_status} | RES: {res_status}\n"
+        adm_status = "YES" if (len(u) > 7 and u[7]) else "NO"
+        file_content += f"UID: {uid} | UNAME: {uname} | PHONE: {phone} | BAL: ₹{bal:.2f} | BUY: {orders} | VIP: {vip_status} | RES: {res_status} | ADM: {adm_status}\n"
     doc = BufferedInputFile(file_content.encode('utf-8'), filename=f"DB_{datetime.now().strftime('%Y%m%d')}.txt")
     await call.message.answer_document(document=doc, caption="📋 <b>Database export complete.</b>", parse_mode='HTML')
     await call.answer()
+
+async def render_user_profile_view(target: Any, user_id: int, state: FSMContext, is_callback: bool = True):
+    user_q = db_query("SELECT user_id, first_name, username, balance, is_reseller, orders_count, spent, joined_date, is_banned, warnings, is_vip, is_admin FROM users WHERE user_id=?", (user_id,), fetchone=True)
+    if not user_q:
+        msg_text = f"❌ User ID <code>{user_id}</code> not found in database."
+        if is_callback: await target.edit_text(msg_text, reply_markup=admin_back_kb(), parse_mode='HTML')
+        else: await target.answer(msg_text, reply_markup=admin_back_kb(), parse_mode='HTML')
+        return
+
+    u_id, u_name, u_user, bal, is_res, orders, spent, joined, is_banned, warnings, is_vip, is_adm = user_q
+    await state.update_data(target_u_id=u_id)
+    
+    status_emoji = "🔴 BANNED" if is_banned else "🟢 ACTIVE"
+    tags = []
+    if u_id == ADMIN_ID: tags.append("👑 Owner")
+    elif is_adm: tags.append("⭐ Sub-Admin")
+    if is_res: tags.append("👑 Wholesale Reseller")
+    if is_vip: tags.append("🌟 VIP Member")
+    type_str = " | ".join(tags) if tags else "👤 Regular Customer"
+    
+    text = (
+        f"🛡 <b><u>USER PROFILE & CONTROL TERMINAL</u></b> 🛡\n━━━━━━━━━━━━━━━━━━\n"
+        f"📛 <b>Name:</b> {u_name or 'User'} (@{u_user or 'None'})\n"
+        f"🆔 <b>Telegram ID:</b> <code>{u_id}</code>\n"
+        f"📊 <b>Account Status:</b> {status_emoji}\n"
+        f"🔰 <b>Roles:</b> {type_str}\n"
+        f"⚠️ <b>Warnings Issued:</b> {warnings}\n━━━━━━━━━━━━━━━━━━\n"
+        f"💰 <b>Wallet Balance:</b> <b>{fmt_curr(bal)}</b>\n"
+        f"📦 <b>Orders Purchased:</b> {orders} Keys\n"
+        f"💸 <b>Total Money Spent:</b> {fmt_curr(spent)}\n"
+        f"📅 <b>Registered Date:</b> {joined or 'N/A'}"
+    )
+    
+    res_btn_text = "❌ Demote from Reseller" if is_res else "👑 Promote to Reseller"
+    adm_btn_text = "❌ Demote Admin" if is_adm else "⭐ Promote to Admin"
+    vip_btn_text = "❌ Remove VIP" if is_vip else "🌟 Grant VIP"
+    ban_btn_text = "✅ Unban User" if is_banned else "🚫 Ban User"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Add Balance", callback_data=f"usrctrl_add_{u_id}", style="success"), InlineKeyboardButton(text="➖ Deduct Balance", callback_data=f"usrctrl_min_{u_id}", style="danger")],
+        [InlineKeyboardButton(text=res_btn_text, callback_data=f"usrctrl_res_{u_id}", style="primary"), InlineKeyboardButton(text=adm_btn_text, callback_data=f"usrctrl_adm_{u_id}", style="primary")],
+        [InlineKeyboardButton(text=vip_btn_text, callback_data=f"usrctrl_vip_{u_id}", style="primary"), InlineKeyboardButton(text=ban_btn_text, callback_data=f"usrctrl_ban_{u_id}", style="danger")],
+        [InlineKeyboardButton(text="⚠️ Send Warning", callback_data=f"usrctrl_warn_{u_id}", style="danger")],
+        [InlineKeyboardButton(text="🔙 Back to Users List", callback_data="admin_user_control_start", icon_custom_emoji_id=get_emoji_icon("back"))]
+    ])
+    
+    if is_callback:
+        await target.edit_text(text, reply_markup=kb, parse_mode='HTML')
+    else:
+        await target.answer(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("usrctrl_view_"))
+async def usrctrl_view_user(call: CallbackQuery, state: FSMContext):
+    if not is_admin_user(call.from_user.id): return
+    u_id = int(call.data.split("usrctrl_view_")[1])
+    await render_user_profile_view(call.message, u_id, state, is_callback=True)
 
 @dp.message(AdminStates.manage_target_user)
 async def process_user_lookup(m: Message, state: FSMContext):
     target = m.text.strip()
     if target.startswith('@'): target = target[1:]
-    loader_msg = await hacker_loading(m, "Querying User Database")
-    user_q = db_query("SELECT user_id, first_name, username, balance, is_reseller, orders_count, spent, joined_date, is_banned, warnings, is_vip FROM users WHERE user_id=? OR username=? COLLATE NOCASE", (target, target), fetchone=True)
-    if not user_q: return await loader_msg.edit_text("❌ Target not found in the grid. Check ID/Username syntax.", reply_markup=admin_back_kb(), parse_mode='HTML')
-    u_id, u_name, u_user, bal, is_res, orders, spent, joined, is_banned, warnings, is_vip = user_q
-    await state.update_data(target_u_id=u_id)
-    status_emoji = "🔴 BANNED" if is_banned else "🟢 ACTIVE"
-    tags = []
-    if is_res: tags.append("👑 Reseller")
-    if is_vip: tags.append("🌟 VIP")
-    type_str = " | ".join(tags) if tags else "👤 Regular"
-    text = (f"🛡 <b><u>USER CONTROL TERMINAL</u></b> 🛡\n━━━━━━━━━━━━━━━━━━\n📛 <b>Name:</b> {u_name} (@{u_user})\n🆔 <b>ID:</b> <code>{u_id}</code>\n📊 <b>Status:</b> {status_emoji}\n🔰 <b>Type:</b> {type_str}\n⚠️ <b>Warnings Issued:</b> {warnings}\n━━━━━━━━━━━━━━━━━━\n💰 <b>Wallet Balance:</b> {fmt_curr(bal)}\n📦 <b>Orders:</b> {orders} | 💸 <b>Total Spent:</b> {fmt_curr(spent)}\n📅 <b>Joined:</b> {joined}")
-    ban_btn_text = "Unban ✅" if is_banned else "Ban 🚫"
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Add Funds ➕", callback_data=f"usrctrl_add_{u_id}", style="success"), InlineKeyboardButton(text="Minus Funds ➖", callback_data=f"usrctrl_min_{u_id}", style="danger")],
-        [InlineKeyboardButton(text=ban_btn_text, callback_data=f"usrctrl_ban_{u_id}", style="danger"), InlineKeyboardButton(text="Warn User ⚠️", callback_data=f"usrctrl_warn_{u_id}", style="danger")],
-        [InlineKeyboardButton(text="Give VIP 🌟" if not is_vip else "Remove VIP 🚫", callback_data=f"usrctrl_vip_{u_id}", style="success")],
-        [InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
-    ])
-    await loader_msg.edit_text(text, reply_markup=kb, parse_mode='HTML')
+    user_q = db_query("SELECT user_id FROM users WHERE user_id=? OR username=? COLLATE NOCASE", (target, target), fetchone=True)
+    if not user_q:
+        return await m.answer("❌ Target user not found in database. Check ID or @username.", reply_markup=admin_back_kb(), parse_mode='HTML')
+    await render_user_profile_view(m, user_q[0], state, is_callback=False)
 
 @dp.callback_query(F.data.startswith("usrctrl_"))
 async def handle_user_actions(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    action = call.data.split("_")[1]
-    u_id = int(call.data.split("_")[2])
+    if not is_admin_user(call.from_user.id): return
+    parts = call.data.split("_")
+    action = parts[1]
+    u_id = int(parts[2])
     await state.update_data(target_u_id=u_id)
-    if action == "ban":
-        current_status = db_query("SELECT is_banned FROM users WHERE user_id=?", (u_id,), fetchone=True)[0]
-        if current_status == 0:
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Yes, Ban", callback_data=f"confirm_ban_{u_id}", style="danger"), InlineKeyboardButton(text="❌ Cancel", callback_data="admin_user_control_start", style="danger")]
-            ])
-            await call.message.edit_text(f"⚠️ Are you sure you want to <b>BAN</b> user <code>{u_id}</code>?", reply_markup=kb, parse_mode='HTML')
-            await state.set_state(AdminStates.confirm_ban)
+    
+    if action == "res":
+        current = db_query("SELECT is_reseller FROM users WHERE user_id=?", (u_id,), fetchone=True)
+        is_res = current[0] if current else 0
+        if is_res:
+            db_query("UPDATE users SET is_reseller=0 WHERE user_id=?", (u_id,))
+            await call.answer("❌ Reseller status removed!", show_alert=True)
+            try: await bot.send_message(u_id, "ℹ️ <b>Your Wholesale Reseller access has been deactivated by Admin.</b>", parse_mode='HTML')
+            except: pass
         else:
-            db_query("UPDATE users SET is_banned=0 WHERE user_id=?", (u_id,))
-            await call.answer("✅ User unbanned successfully!", show_alert=True)
-            m = call.message; m.text = str(u_id); await process_user_lookup(m, state)
+            db_query("UPDATE users SET is_reseller=1, reseller_since=? WHERE user_id=?", (datetime.now().strftime("%Y-%m-%d"), u_id))
+            await call.answer("👑 User promoted to Wholesale Reseller!", show_alert=True)
+            try: await bot.send_message(u_id, "🎉 <b>Congratulations!</b>\nAdmin has upgraded your account to <b>👑 Wholesale Reseller</b>!\nYou now enjoy wholesale prices on all panels in Store!", parse_mode='HTML')
+            except: pass
+        await render_user_profile_view(call.message, u_id, state, is_callback=True)
+
+    elif action == "adm":
+        if u_id == ADMIN_ID:
+            return await call.answer("⚠️ Cannot change role of the Primary Owner.", show_alert=True)
+        current = db_query("SELECT is_admin FROM users WHERE user_id=?", (u_id,), fetchone=True)
+        is_adm = current[0] if current else 0
+        if is_adm:
+            db_query("UPDATE users SET is_admin=0 WHERE user_id=?", (u_id,))
+            await call.answer("❌ Admin privileges revoked!", show_alert=True)
+            try: await bot.send_message(u_id, "ℹ️ <b>Your Admin privileges have been revoked by the Owner.</b>", parse_mode='HTML')
+            except: pass
+        else:
+            db_query("UPDATE users SET is_admin=1 WHERE user_id=?", (u_id,))
+            await call.answer("⭐ User promoted to Admin!", show_alert=True)
+            try: await bot.send_message(u_id, "⭐ <b>Admin Privileges Granted!</b>\nYou have been promoted to Admin by the Owner. Use /admin to access the control panel.", parse_mode='HTML')
+            except: pass
+        await render_user_profile_view(call.message, u_id, state, is_callback=True)
+
     elif action == "vip":
-        current_status = db_query("SELECT is_vip FROM users WHERE user_id=?", (u_id,), fetchone=True)[0]
-        if current_status == 1:
+        current = db_query("SELECT is_vip FROM users WHERE user_id=?", (u_id,), fetchone=True)
+        is_vip = current[0] if current else 0
+        if is_vip:
             db_query("UPDATE users SET is_vip=0 WHERE user_id=?", (u_id,))
-            await call.answer("✅ VIP Removed!", show_alert=True)
+            await call.answer("❌ VIP status removed!", show_alert=True)
+            try: await bot.send_message(u_id, "ℹ️ Your VIP membership has ended.", parse_mode='HTML')
+            except: pass
         else:
             db_query("UPDATE users SET is_vip=1, vip_since=? WHERE user_id=?", (datetime.now().strftime("%Y-%m-%d"), u_id))
-            await call.answer("✅ VIP Granted!", show_alert=True)
-        m = call.message; m.text = str(u_id); await process_user_lookup(m, state)
-    elif action == "add":
-        await call.message.edit_text("💰 Enter the amount to <b>ADD</b> to this user's wallet:", reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.wait_for_add_money)
-    elif action == "min":
-        await call.message.edit_text("💸 Enter the amount to <b>DEDUCT</b> from this user's wallet:", reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.wait_for_minus_money)
-    elif action == "warn":
-        await call.message.edit_text("⚠️ Type the strict warning message you want to send directly to this user:", reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.wait_for_warning)
+            await call.answer("🌟 VIP Membership granted!", show_alert=True)
+            try: await bot.send_message(u_id, "🌟 <b>VIP Granted!</b>\nAdmin has awarded you VIP Membership with exclusive discounts on all store items!", parse_mode='HTML')
+            except: pass
+        await render_user_profile_view(call.message, u_id, state, is_callback=True)
 
-@dp.callback_query(F.data.startswith("confirm_ban_"))
-async def confirm_ban(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    u_id = int(call.data.split("_")[2])
-    db_query("UPDATE users SET is_banned=1 WHERE user_id=?", (u_id,))
-    await call.answer("🔴 User has been banned!", show_alert=True)
-    await state.clear()
-    m = call.message; m.text = str(u_id); await process_user_lookup(m, state)
+    elif action == "ban":
+        current = db_query("SELECT is_banned FROM users WHERE user_id=?", (u_id,), fetchone=True)
+        is_banned = current[0] if current else 0
+        if is_banned:
+            db_query("UPDATE users SET is_banned=0 WHERE user_id=?", (u_id,))
+            await call.answer("✅ User unbanned successfully!", show_alert=True)
+            try: await bot.send_message(u_id, "✅ <b>Your account has been unbanned by Admin.</b>", parse_mode='HTML')
+            except: pass
+            await render_user_profile_view(call.message, u_id, state, is_callback=True)
+        else:
+            db_query("UPDATE users SET is_banned=1 WHERE user_id=?", (u_id,))
+            await call.answer("🔴 User has been banned!", show_alert=True)
+            try: await bot.send_message(u_id, "🔴 <b>Your account has been banned from this bot for policy violations.</b>", parse_mode='HTML')
+            except: pass
+            await render_user_profile_view(call.message, u_id, state, is_callback=True)
+
+    elif action == "add":
+        await call.message.edit_text(f"💰 <b>Add Balance to User</b> <code>{u_id}</code>:\n\nEnter the amount in ₹ to <b>CREDIT</b> (e.g. <code>500</code>):", reply_markup=admin_back_kb(), parse_mode='HTML')
+        await state.set_state(AdminStates.wait_for_add_money)
+
+    elif action == "min":
+        await call.message.edit_text(f"💸 <b>Deduct Balance from User</b> <code>{u_id}</code>:\n\nEnter the amount in ₹ to <b>DEBIT</b> (e.g. <code>200</code>):", reply_markup=admin_back_kb(), parse_mode='HTML')
+        await state.set_state(AdminStates.wait_for_minus_money)
+
+    elif action == "warn":
+        await call.message.edit_text(f"⚠️ <b>Send Warning to User</b> <code>{u_id}</code>:\n\nType the warning message:", reply_markup=admin_back_kb(), parse_mode='HTML')
+        await state.set_state(AdminStates.wait_for_warning)
 
 @dp.message(AdminStates.wait_for_add_money)
 async def exec_add_money(m: Message, state: FSMContext):
     try:
-        amt = float(m.text)
+        amt = float(m.text.strip())
+        if amt <= 0: return await m.answer("❌ Amount must be greater than 0.")
         data = await state.get_data()
         u_id = data['target_u_id']
         db_query("UPDATE users SET balance = balance + ? WHERE user_id=?", (amt, u_id))
-        await m.answer(f"✅ Successfully added {fmt_curr(amt)} to target <code>{u_id}</code>.", reply_markup=admin_kb(), parse_mode='HTML')
-        try: await bot.send_message(u_id, f"💰 <b>Wallet Top-up!</b>\nAdmin has manually added {fmt_curr(amt)} to your wallet.", parse_mode='HTML')
+        new_bal = db_query("SELECT balance FROM users WHERE user_id=?", (u_id,), fetchone=True)[0]
+        
+        await m.answer(f"✅ <b>Successfully added {fmt_curr(amt)} to user <code>{u_id}</code>!</b>\nNew Balance: <b>{fmt_curr(new_bal)}</b>", reply_markup=admin_kb(), parse_mode='HTML')
+        try:
+            await bot.send_message(u_id, f"💰 <b>Wallet Top-up Received!</b>\n\nAdmin has credited <b>{fmt_curr(amt)}</b> to your wallet.\nYour Current Balance: <b>{fmt_curr(new_bal)}</b>", parse_mode='HTML')
         except: pass
         await state.clear()
-    except ValueError: await m.answer("❌ Critical Error: Input must be a valid number.")
+    except ValueError:
+        await m.answer("❌ Please enter a valid numerical amount (e.g. <code>500</code>).", parse_mode='HTML')
 
 @dp.message(AdminStates.wait_for_minus_money)
 async def exec_minus_money(m: Message, state: FSMContext):
     try:
-        amt = float(m.text)
+        amt = float(m.text.strip())
+        if amt <= 0: return await m.answer("❌ Amount must be greater than 0.")
         data = await state.get_data()
         u_id = data['target_u_id']
         db_query("UPDATE users SET balance = balance - ? WHERE user_id=?", (amt, u_id))
-        await m.answer(f"✅ Successfully deducted {fmt_curr(amt)} from target <code>{u_id}</code>.", reply_markup=admin_kb(), parse_mode='HTML')
+        new_bal = db_query("SELECT balance FROM users WHERE user_id=?", (u_id,), fetchone=True)[0]
+        
+        await m.answer(f"✅ <b>Successfully deducted {fmt_curr(amt)} from user <code>{u_id}</code>!</b>\nNew Balance: <b>{fmt_curr(new_bal)}</b>", reply_markup=admin_kb(), parse_mode='HTML')
+        try:
+            await bot.send_message(u_id, f"💸 <b>Wallet Balance Debited!</b>\n\nAdmin has deducted <b>{fmt_curr(amt)}</b> from your wallet.\nYour Current Balance: <b>{fmt_curr(new_bal)}</b>", parse_mode='HTML')
+        except: pass
         await state.clear()
-    except ValueError: await m.answer("❌ Critical Error: Input must be a valid number.")
+    except ValueError:
+        await m.answer("❌ Please enter a valid numerical amount (e.g. <code>200</code>).", parse_mode='HTML')
 
 @dp.message(AdminStates.wait_for_warning)
 async def exec_warn_user(m: Message, state: FSMContext):
     data = await state.get_data()
     u_id = data['target_u_id']
-    warn_text = m.text
+    warn_text = m.text.strip()
     db_query("UPDATE users SET warnings = warnings + 1 WHERE user_id=?", (u_id,))
-    await m.answer(f"✅ Official warning dispatched to <code>{u_id}</code>.", reply_markup=admin_kb(), parse_mode='HTML')
-    try: await bot.send_message(u_id, f"⚠️ <b>OFFICIAL WARNING FROM SYSTEM ADMIN:</b>\n\n{warn_text}\n\n<i>Subsequent infractions may lead to an automated grid ban.</i>", parse_mode='HTML')
+    total_warns = db_query("SELECT warnings FROM users WHERE user_id=?", (u_id,), fetchone=True)[0]
+    
+    await m.answer(f"✅ Warning dispatched to user <code>{u_id}</code> (Total Warnings: {total_warns}).", reply_markup=admin_kb(), parse_mode='HTML')
+    try:
+        await bot.send_message(u_id, f"⚠️ <b>OFFICIAL WARNING FROM ADMIN:</b>\n\n{warn_text}\n\n<i>Total warnings: {total_warns}/3. Please adhere to bot terms of service.</i>", parse_mode='HTML')
     except: pass
     await state.clear()
 
@@ -2458,21 +2650,122 @@ async def save_new_plan_db(m: Message, state: FSMContext, cat: str, panel_name: 
 
 @dp.callback_query(F.data == "admin_manage_prods")
 async def admin_manage_prods(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
-    prods = db_query("SELECT id, name, category, panel_name, stock, is_active, bantibhaiya_product_pid FROM products ORDER BY category, panel_name", fetchall=True)
-    if not prods: return await call.message.edit_text("📦 Store Database is completely empty.", reply_markup=admin_back_kb(), parse_mode='HTML')
+    if not is_admin_user(call.from_user.id): return
+    panels = db_query(
+        "SELECT MIN(id), category, panel_name, bantibhaiya_product_pid, COUNT(*) as plan_count FROM products WHERE panel_name != '' GROUP BY category, panel_name ORDER BY category, panel_name",
+        fetchall=True
+    )
+    if not panels:
+        return await call.message.edit_text("📦 Store Database is completely empty.\n\nClick <b>'➕ Add Product'</b> to create your first panel.", reply_markup=admin_back_kb(), parse_mode='HTML')
+        
     kb = InlineKeyboardMarkup(inline_keyboard=[])
-    for p in prods:
-        status_dot = "🟢" if p[5] else "🔴"
-        panel_name = p[3] if p[3] is not None else ""
-        engine_tag = "⚡ Auto-API" if p[6] else f"Stock: {p[4]}"
-        kb.inline_keyboard.append([InlineKeyboardButton(text=f"{status_dot} [{p[2]}] {panel_name} - {p[1]} ({engine_tag})", callback_data=f"admin_view_p_{p[0]}", style="primary")])
+    for p in panels:
+        first_id, cat, panel_name, bb_pid, plan_count = p
+        pid_tag = f"PID: {bb_pid[:12]}" if bb_pid else "No PID"
+        btn_text = f"📁 {panel_name} ({plan_count} Plans | {pid_tag})"
+        kb.inline_keyboard.append([InlineKeyboardButton(text=btn_text, callback_data=f"admin_pnl_view_{first_id}", style="primary")])
+        
+    kb.inline_keyboard.append([InlineKeyboardButton(text="➕ Add New Product / Panel", callback_data="addprod_new_panel_btn", style="success")])
     kb.inline_keyboard.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
-    await call.message.edit_text("📦 <b>Database Editor: Select Product to modify</b>", reply_markup=kb, parse_mode='HTML')
+    
+    text = (
+        f"📦 <b><u>STORE PRODUCTS & PANELS</u></b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"Total Panels: <b>{len(panels)}</b>\n\n"
+        f"👇 <b>Select a Product / Panel below to view and manage all its plans:</b>"
+    )
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("admin_pnl_view_"))
+async def admin_panel_plans_view(call: CallbackQuery):
+    if not is_admin_user(call.from_user.id): return
+    first_id = int(call.data.split("admin_pnl_view_")[1])
+    prod = db_query("SELECT category, panel_name, bantibhaiya_product_pid, apk_link, is_maintenance FROM products WHERE id=?", (first_id,), fetchone=True)
+    if not prod:
+        return await call.answer("❌ Panel not found!", show_alert=True)
+        
+    cat, panel_name, bb_pid, apk_link, is_maint = prod
+    is_maint = bool(is_maint) if is_maint else False
+    
+    plans = db_query(
+        "SELECT id, name, price_inr, reseller_price, bantibhaiya_product_duration, is_active FROM products WHERE category=? AND panel_name=? ORDER BY price_inr ASC",
+        (cat, panel_name),
+        fetchall=True
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    if plans:
+        for pl in plans:
+            pl_id, pl_name, pl_price, pl_rprice, pl_api_dur, is_act = pl
+            dot = "🟢" if is_act else "🔴"
+            kb.inline_keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{dot} {pl_name} | {fmt_curr(pl_price)} (API: {pl_api_dur})",
+                    callback_data=f"admin_view_p_{pl_id}",
+                    style="primary"
+                )
+            ])
+            
+    maint_btn_text = "🟢 Turn OFF Maintenance (Make Live)" if is_maint else "🔴 Put Under Maintenance Mode"
+    maint_style = "success" if is_maint else "danger"
+    
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text=f"➕ Add Another Plan to {panel_name[:15]}", callback_data=f"addprod_pnl_{panel_name[:30]}", style="success")
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text=maint_btn_text, callback_data=f"toggle_maint_pnl_{first_id}", style=maint_style)
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="🗑 Delete Entire Panel", callback_data=f"del_all_pnl_{first_id}", style="danger")
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="🔙 Back to Products", callback_data="admin_manage_prods", icon_custom_emoji_id=get_emoji_icon("back"))
+    ])
+    
+    maint_status_text = "🔴 <b>UNDER MAINTENANCE</b> (Purchases Blocked)" if is_maint else "🟢 <b>LIVE</b> (Available for Customers)"
+    
+    text = (
+        f"📁 <b><u>PANEL: {panel_name}</u></b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"📦 <b>Category:</b> {cat}\n"
+        f"🔑 <b>Panel PID:</b> <code>{bb_pid or 'Not Set'}</code>\n"
+        f"📥 <b>APK Link:</b> {apk_link or 'None'}\n"
+        f"🛠 <b>Status:</b> {maint_status_text}\n"
+        f"📊 <b>Total Plans:</b> {len(plans)} Plans\n━━━━━━━━━━━━━━━━━━\n"
+        f"👇 <b>Select any plan below to edit Price, Reseller Duration or Delete:</b>"
+    )
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("toggle_maint_pnl_"))
+async def admin_toggle_panel_maintenance(call: CallbackQuery):
+    if not is_admin_user(call.from_user.id): return
+    first_id = int(call.data.split("toggle_maint_pnl_")[1])
+    prod = db_query("SELECT category, panel_name, is_maintenance FROM products WHERE id=?", (first_id,), fetchone=True)
+    if not prod: return await call.answer("Panel not found.", show_alert=True)
+    cat, panel_name, current_maint = prod
+    
+    new_maint = 0 if (current_maint and current_maint == 1) else 1
+    db_query("UPDATE products SET is_maintenance=? WHERE category=? AND panel_name=?", (new_maint, cat, panel_name))
+    
+    msg = f"🔴 '{panel_name}' is now in MAINTENANCE MODE!\nUsers cannot open or buy it in Store." if new_maint == 1 else f"🟢 '{panel_name}' is now LIVE!\nUsers can view and buy plans."
+    await call.answer(msg, show_alert=True)
+    
+    call.data = f"admin_pnl_view_{first_id}"
+    await admin_panel_plans_view(call)
+
+@dp.callback_query(F.data.startswith("del_all_pnl_"))
+async def admin_delete_entire_panel(call: CallbackQuery):
+    if not is_admin_user(call.from_user.id): return
+    first_id = int(call.data.split("del_all_pnl_")[1])
+    prod = db_query("SELECT category, panel_name FROM products WHERE id=?", (first_id,), fetchone=True)
+    if not prod: return await call.answer("Panel already deleted.", show_alert=True)
+    cat, panel_name = prod
+    
+    db_query("DELETE FROM products WHERE category=? AND panel_name=?", (cat, panel_name))
+    await call.answer(f"🗑 Panel '{panel_name}' and all its plans deleted!", show_alert=True)
+    await admin_manage_prods(call)
 
 @dp.callback_query(F.data.startswith("admin_view_p_"))
 async def admin_view_product(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     try:
         p_id = int(call.data.split("_")[3])
         prod = db_query("SELECT * FROM products WHERE id=?", (p_id,), fetchone=True)
@@ -2482,31 +2775,29 @@ async def admin_view_product(call: CallbackQuery):
         reseller_price = safe_float(prod[5])
         bb_pid = prod[10] or "Not set"
         bb_duration = prod[11] or "Not set"
+        
+        first_panel_item = db_query("SELECT id FROM products WHERE category=? AND panel_name=? LIMIT 1", (prod[1], panel_name), fetchone=True)
+        first_id = first_panel_item[0] if first_panel_item else p_id
+        
         text = (
-            f"📦 <b><u>PRODUCT CONFIGURATION</u></b>\n━━━━━━━━━━━━━━━━━━\n"
-            f"<b>ID:</b> <code>{prod[0]}</code>\n"
-            f"<b>Panel Group:</b> {prod[1]}\n"
-            f"<b>Panel Name:</b> {panel_name}\n"
-            f"<b>Package Name:</b> {prod[3]}\n"
-            f"<b>Standard Price:</b> {fmt_curr(price_inr)}\n"
-            f"👑 <b>Wholesale Price:</b> {fmt_curr(reseller_price)}\n"
-            f"<b>Payload Link:</b> {prod[7] if prod[7] else 'None'}\n"
-            f"<b>Time Config:</b> {prod[8]}\n"
-            f"<b>HWID Limit:</b> {prod[9]}\n"
+            f"📦 <b><u>PLAN CONFIGURATION</u></b>\n━━━━━━━━━━━━━━━━━━\n"
+            f"📁 <b>Panel Name:</b> <b>{panel_name}</b>\n"
+            f"📦 <b>Category:</b> {prod[1]}\n"
+            f"📅 <b>Plan Display Name:</b> <b>{prod[3]}</b>\n"
+            f"💰 <b>Standard User Price:</b> {fmt_curr(price_inr)}\n"
+            f"👑 <b>Wholesale Reseller Price:</b> {fmt_curr(reseller_price)}\n"
             f"🔑 <b>Bantibhaiya PID:</b> <code>{bb_pid}</code>\n"
-            f"⏱ <b>Bantibhaiya Duration:</b> <code>{bb_duration}</code>\n"
-            f"⚡ <b>Key Engine:</b> Bantibhaiya Reseller API\n"
-            f"<b>Visibility:</b> {'Active' if prod[12] else 'Hidden'}\n━━━━━━━━━━━━━━━━━━"
+            f"⏱ <b>Bantibhaiya API Duration:</b> <code>{bb_duration}</code>\n"
+            f"📥 <b>APK Link:</b> {prod[7] if prod[7] else 'None'}\n"
+            f"👁 <b>Status:</b> {'🟢 Active' if prod[12] else '🔴 Hidden'}\n━━━━━━━━━━━━━━━━━━"
         )
-        toggle_btn_text = "Hide Product 👁‍🗨" if prod[12] else "Unhide Product 👁"
+        toggle_btn_text = "Hide Plan 👁‍🗨" if prod[12] else "Unhide Plan 🟢"
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Edit Panel Group 🏷️", callback_data=f"edit_p_{p_id}_cat", style="primary"), InlineKeyboardButton(text="Edit Panel Name 🏷️", callback_data=f"edit_p_{p_id}_panel_name", style="primary")],
-            [InlineKeyboardButton(text="Edit Package Name ✏️", callback_data=f"edit_p_{p_id}_name", style="primary")],
-            [InlineKeyboardButton(text="Edit Price 💰", callback_data=f"edit_p_{p_id}_price", style="primary"), InlineKeyboardButton(text="Edit R-Price 👑", callback_data=f"edit_p_{p_id}_rprice", style="primary")],
-            [InlineKeyboardButton(text="Edit Validity ⏳", callback_data=f"edit_p_{p_id}_validity", style="primary"), InlineKeyboardButton(text="Edit Device 📱", callback_data=f"edit_p_{p_id}_device", style="primary")],
-            [InlineKeyboardButton(text="Edit BB PID 🔑", callback_data=f"edit_p_{p_id}_bbpid", style="primary"), InlineKeyboardButton(text="Edit BB Duration ⏱", callback_data=f"edit_p_{p_id}_bbduration", style="primary")],
-            [InlineKeyboardButton(text="Edit APK Link 🔗", callback_data=f"edit_p_{p_id}_apk", style="primary"), InlineKeyboardButton(text=toggle_btn_text, callback_data=f"toggle_p_{p_id}", style="danger")],
-            [InlineKeyboardButton(text="Delete Product 🗑", callback_data=f"delete_p_{p_id}", style="danger"), InlineKeyboardButton(text="BACK", callback_data="admin_manage_prods", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+            [InlineKeyboardButton(text="💰 Edit User Price", callback_data=f"edit_p_{p_id}_price", style="primary"), InlineKeyboardButton(text="👑 Edit Reseller Price", callback_data=f"edit_p_{p_id}_rprice", style="primary")],
+            [InlineKeyboardButton(text="⏱ Edit API Duration", callback_data=f"edit_p_{p_id}_bbduration", style="primary"), InlineKeyboardButton(text="📅 Edit Display Name", callback_data=f"edit_p_{p_id}_name", style="primary")],
+            [InlineKeyboardButton(text="🔑 Edit Panel PID", callback_data=f"edit_p_{p_id}_bbpid", style="primary"), InlineKeyboardButton(text="🔗 Edit APK Link", callback_data=f"edit_p_{p_id}_apk", style="primary")],
+            [InlineKeyboardButton(text=toggle_btn_text, callback_data=f"toggle_p_{p_id}", style="primary"), InlineKeyboardButton(text="🗑 Delete This Plan", callback_data=f"delete_p_{p_id}", style="danger")],
+            [InlineKeyboardButton(text=f"🔙 Back to {panel_name[:15]} Plans", callback_data=f"admin_pnl_view_{first_id}", icon_custom_emoji_id=get_emoji_icon("back"))]
         ])
         await call.message.edit_text(text, reply_markup=kb, disable_web_page_preview=True, parse_mode='HTML')
     except Exception as e:
@@ -2515,7 +2806,7 @@ async def admin_view_product(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("toggle_p_"))
 async def admin_toggle_product(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     p_id = int(call.data.split("_")[2])
     current = db_query("SELECT is_active FROM products WHERE id=?", (p_id,), fetchone=True)[0]
     new_val = 0 if current == 1 else 1
@@ -2525,7 +2816,7 @@ async def admin_toggle_product(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("edit_p_"))
 async def start_edit_product(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     parts = call.data.split("_", 3)
     if len(parts) < 4:
         return await call.answer("Invalid callback data.", show_alert=True)
@@ -2533,18 +2824,18 @@ async def start_edit_product(call: CallbackQuery, state: FSMContext):
     field = parts[3]
     await state.update_data(edit_p_id=p_id, edit_field=field)
     field_name_map = {
-        'cat': 'New Panel Group/Category Name',
+        'cat': 'New Category Name',
         'panel_name': 'New Panel Name',
-        'name': 'New Package/Date Name',
-        'price': 'New Standard Price in ₹',
-        'rprice': 'New Reseller Price in ₹',
+        'name': 'New Plan Display Name (e.g. 7 Days)',
+        'price': 'New Standard User Price in ₹',
+        'rprice': 'New Wholesale Reseller Price in ₹',
         'validity': 'New Time Validity String',
         'device': 'New HWID Limit String',
-        'bbpid': 'New Bantibhaiya Product PID (or type "none")',
-        'bbduration': 'New Bantibhaiya Product Duration (or type "none")',
-        'apk': 'New Payload Link (or type "none")'
+        'bbpid': 'New Bantibhaiya Product PID',
+        'bbduration': 'New Bantibhaiya API Duration parameter (e.g. 7d, 7 Days)',
+        'apk': 'New APK Link (or type "none")'
     }
-    await call.message.edit_text(f"✏️ Input the required data for: <b>{field_name_map.get(field, field)}</b>", reply_markup=admin_back_kb(), parse_mode='HTML')
+    await call.message.edit_text(f"✏️ <b>Enter {field_name_map.get(field, field)}:</b>", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_new_value)
 
 @dp.message(AdminStates.wait_for_new_value)
@@ -2561,17 +2852,40 @@ async def process_edit_value(m: Message, state: FSMContext):
         new_val = "" if new_val.lower() == 'none' else new_val
     
     db_col_map = {'cat': 'category', 'panel_name': 'panel_name', 'name': 'name', 'price': 'price_inr', 'rprice': 'reseller_price', 'validity': 'validity', 'device': 'device_limit', 'bbpid': 'bantibhaiya_product_pid', 'bbduration': 'bantibhaiya_product_duration', 'apk': 'apk_link'}
-    db_query(f"UPDATE products SET {db_col_map[field]}=? WHERE id=?", (new_val, p_id))
-    await m.answer("✅ <b>Product updated gracefully!</b>", reply_markup=admin_kb(), parse_mode='HTML')
+    
+    # If editing panel-wide fields (panel_name, bbpid, apk), update across all plans in that panel
+    if field in ['panel_name', 'bbpid', 'apk']:
+        prod = db_query("SELECT category, panel_name FROM products WHERE id=?", (p_id,), fetchone=True)
+        if prod:
+            cat, p_name = prod
+            db_query(f"UPDATE products SET {db_col_map[field]}=? WHERE category=? AND panel_name=?", (new_val, cat, p_name))
+    else:
+        db_query(f"UPDATE products SET {db_col_map[field]}=? WHERE id=?", (new_val, p_id))
+        
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔍 View Plan Details", callback_data=f"admin_view_p_{p_id}", style="primary")],
+        [InlineKeyboardButton(text="📦 Back to Products", callback_data="admin_manage_prods", icon_custom_emoji_id=get_emoji_icon("back"))]
+    ])
+    await m.answer(f"✅ <b>Plan property updated successfully!</b>", reply_markup=kb, parse_mode='HTML')
     await state.clear()
 
 @dp.callback_query(F.data.startswith("delete_p_"))
 async def admin_delete_product(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     p_id = int(call.data.split("_")[2])
+    prod = db_query("SELECT category, panel_name FROM products WHERE id=?", (p_id,), fetchone=True)
+    
     db_query("DELETE FROM products WHERE id=?", (p_id,))
     db_query("DELETE FROM product_keys WHERE product_id=?", (p_id,))
-    await call.answer("🗑 Product deleted successfully!", show_alert=True)
+    await call.answer("🗑 Plan deleted successfully!", show_alert=True)
+    
+    if prod:
+        cat, panel_name = prod
+        remaining = db_query("SELECT id FROM products WHERE category=? AND panel_name=? LIMIT 1", (cat, panel_name), fetchone=True)
+        if remaining:
+            call.data = f"admin_pnl_view_{remaining[0]}"
+            return await admin_panel_plans_view(call)
+            
     await admin_manage_prods(call)
 
 # ==============================================================================

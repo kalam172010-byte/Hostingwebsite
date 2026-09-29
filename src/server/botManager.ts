@@ -286,6 +286,88 @@ export function loadManifests() {
         });
       }
     }
+
+    // Auto-discover Python bots on disk if manifest was missing (e.g. on fresh Render/GitHub deployments)
+    if (fs.existsSync(hostedPythonBotsDir)) {
+      try {
+        const dirs = fs.readdirSync(hostedPythonBotsDir);
+        dirs.forEach(sub => {
+          const fullSub = path.join(hostedPythonBotsDir, sub);
+          try {
+            if (fs.statSync(fullSub).isDirectory() && !hostedPythonBots.some(b => b.id === sub)) {
+              const files = fs.readdirSync(fullSub);
+              const pyFile = files.find(f => f.endsWith('.py'));
+              if (pyFile) {
+                const stats = fs.statSync(path.join(fullSub, pyFile));
+                const recoveredBot: HostedPythonBot = {
+                  id: sub,
+                  name: pyFile,
+                  entryFile: pyFile,
+                  sourceType: 'telegram_bot',
+                  senderUsername: 'Akash_12121',
+                  senderId: 8808556338,
+                  originalFileName: pyFile,
+                  fileSizeMB: Math.round((stats.size / (1024 * 1024)) * 1000) / 1000,
+                  status: 'RUNNING',
+                  startedAt: new Date().toLocaleTimeString(),
+                  uptimeSeconds: 0,
+                  envVars: {},
+                  logs: ['[SYSTEM] Auto-discovered from disk.'],
+                  description: 'Auto-recovered on boot',
+                  botId: 'bot_master_primary',
+                  consecutiveCrashCount: 0,
+                  autoRestartEnabled: true,
+                  exitCode: 0,
+                  restartCount: 0
+                };
+                hostedPythonBots.push(recoveredBot);
+              }
+            }
+          } catch (_) {}
+        });
+      } catch (_) {}
+    }
+
+    if (hostedPythonBots.length === 0 && fs.existsSync(downloadsRootDir)) {
+      try {
+        const downloadSubs = fs.readdirSync(downloadsRootDir);
+        downloadSubs.forEach(dSub => {
+          const fullPath = path.join(downloadsRootDir, dSub);
+          if (fs.statSync(fullPath).isDirectory()) {
+            const files = fs.readdirSync(fullPath);
+            const pyFile = files.find(f => f.endsWith('.py'));
+            if (pyFile) {
+              const botId = `pybot_${Math.random().toString(36).substring(2, 7)}_${Date.now().toString(36)}`;
+              const targetBotDir = path.join(hostedPythonBotsDir, botId);
+              if (!fs.existsSync(targetBotDir)) fs.mkdirSync(targetBotDir, { recursive: true });
+              fs.copyFileSync(path.join(fullPath, pyFile), path.join(targetBotDir, pyFile));
+              const stats = fs.statSync(path.join(targetBotDir, pyFile));
+              hostedPythonBots.push({
+                id: botId,
+                name: pyFile,
+                entryFile: pyFile,
+                sourceType: 'telegram_bot',
+                senderUsername: 'Akash_12121',
+                senderId: 8808556338,
+                originalFileName: pyFile,
+                fileSizeMB: Math.round((stats.size / (1024 * 1024)) * 1000) / 1000,
+                status: 'RUNNING',
+                startedAt: new Date().toLocaleTimeString(),
+                uptimeSeconds: 0,
+                envVars: {},
+                logs: ['[SYSTEM] Deployed from downloads directory.'],
+                description: 'Auto-recovered on boot',
+                botId: 'bot_master_primary',
+                consecutiveCrashCount: 0,
+                autoRestartEnabled: true,
+                exitCode: 0,
+                restartCount: 0
+              });
+            }
+          }
+        });
+      } catch (_) {}
+    }
     if (fs.existsSync(hostedSitesManifestPath)) {
       const data = JSON.parse(fs.readFileSync(hostedSitesManifestPath, 'utf-8'));
       if (Array.isArray(data)) {
