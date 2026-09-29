@@ -711,7 +711,8 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
 
     botInfo.logs.push(`\n--- [${new Date().toLocaleTimeString()}] 🚀 Launching python3 ${botInfo.entryFile} ---`);
 
-    const child = spawn('python3', [botInfo.entryFile], {
+    const fullScriptPath = path.resolve(botDir, botInfo.entryFile);
+    const child = spawn('python3', [fullScriptPath], {
       cwd: botDir,
       env
     });
@@ -764,6 +765,15 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
       if (code !== 0 && code !== null) {
         botInfo.consecutiveCrashCount = (botInfo.consecutiveCrashCount || 0) + 1;
 
+        // Check for Invalid Token Unauthorized error
+        if (runStderr.includes('Unauthorized') || runStderr.includes('401 Unauthorized') || runStderr.includes('InvalidToken')) {
+          botInfo.status = 'ERROR';
+          botInfo.autoRestartEnabled = false;
+          botInfo.logs.push(`[CONFIG ERROR] ❌ Invalid Telegram Bot Token: Telegram rejected the token with '401 Unauthorized'. Please verify your BOT_TOKEN from @BotFather in Telegram.`);
+          addLog(botInfo.botId || 'python_engine', 'ERROR', `Bot "${botInfo.name}" (${botInfo.id}) has an invalid BOT_TOKEN. Supervisor stopped restart loop.`);
+          return;
+        }
+
         // Attempt autonomous healing
         const healed = await handleAutoHealPythonBot(botInfo, runStderr);
         if (healed) {
@@ -775,19 +785,27 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
         await notifyUserOfBotError(botInfo, runStderr);
       }
 
+      // If consecutive crashes exceed 10, stop loop and alert user
+      if ((botInfo.consecutiveCrashCount || 0) >= 10) {
+        botInfo.status = 'ERROR';
+        botInfo.autoRestartEnabled = false;
+        botInfo.logs.push(`[SUPERVISOR] ⚠️ Halted auto-restart after 10 consecutive crashes. Please inspect logs, fix the code, or click Restart.`);
+        return;
+      }
+
       // 24/7 AUTO-RESTART SUPERVISOR:
       // If the bot was NOT explicitly stopped by the user, automatically restart it with backoff
-      if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED') {
+      if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED' && botInfo.status !== 'ERROR') {
         botInfo.status = 'RUNNING';
         botInfo.restartCount = (botInfo.restartCount || 0) + 1;
         
         // Calculate backoff: if repeated rapid crashes, increase delay up to 30s
         const crashCount = botInfo.consecutiveCrashCount || 0;
-        let delayMs = 1500;
+        let delayMs = 2000;
         if (crashCount > 6) {
           delayMs = Math.min(30000, 5000 + (crashCount - 6) * 5000);
         } else if (crashCount > 2) {
-          delayMs = 3000;
+          delayMs = 4000;
         }
 
         botInfo.logs.push(`[24/7 SUPERVISOR] 🔄 Auto-restarting bot worker in ${Math.round(delayMs / 1000)}s (Restart #${botInfo.restartCount}) to maintain 24/7 online status...`);
@@ -795,13 +813,13 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
         
         const restartTimer = setTimeout(() => {
           pendingRestartTimeouts.delete(botInfo.id);
-          if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED' && !runningProcesses.has(botInfo.id)) {
+          if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED' && botInfo.status !== 'ERROR' && !runningProcesses.has(botInfo.id)) {
             spawnPythonBotProcess(botInfo);
           }
         }, delayMs);
         pendingRestartTimeouts.set(botInfo.id, restartTimer);
       } else {
-        botInfo.status = 'STOPPED';
+        botInfo.status = botInfo.status || 'STOPPED';
       }
     });
 
