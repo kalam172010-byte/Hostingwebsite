@@ -176,16 +176,10 @@ export function checkAndIncrementDailyUploadLimit(senderId: number): { allowed: 
   const todayStr = new Date().toISOString().split('T')[0];
   const key = `${senderId}_${todayStr}`;
   const currentCount = userDailyUploads.get(key) || 0;
-  // Generous limit to prevent users getting locked out while testing
-  const LIMIT = 20;
-
-  if (currentCount >= LIMIT) {
-    return { allowed: false, currentCount, limit: LIMIT };
-  }
-
+  // Unlimited uploads for users (no daily limit)
   userDailyUploads.set(key, currentCount + 1);
   saveDailyUploadsManifest();
-  return { allowed: true, currentCount: currentCount + 1, limit: LIMIT };
+  return { allowed: true, currentCount: currentCount + 1, limit: 999999 };
 }
 
 export function resetDailyUploadLimit(senderId?: number) {
@@ -1404,7 +1398,7 @@ export async function startRealBot(config: {
           `🌐 <b>Total Hosted Web Sites:</b> <code>${totalProjects} Sites</code>\n` +
           `👥 <b>Total Platform Users:</b> <code>${uniqueUsers} Registered Users</code>\n` +
           `📥 <b>Total Files Uploaded:</b> <code>${totalFiles} Files</code>\n` +
-          `📅 <b>Daily Upload Limit:</b> <code>2 Files / User / Day</code>\n` +
+          `📅 <b>Daily Upload Limit:</b> <code>Unlimited (No Limit)</code>\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
           `🖥️ <b>Server OS:</b> <code>${stats.os}</code>\n` +
           `⚡ <b>CPU Load:</b> <code>${stats.cpuLoad}</code>\n` +
