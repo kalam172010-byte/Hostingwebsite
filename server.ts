@@ -564,16 +564,16 @@ function getListenPort(): number {
     const val = parseInt(args[pIdx + 1], 10);
     if (!isNaN(val)) return val;
   }
+  if (process.env.PORT) {
+    const val = parseInt(process.env.PORT, 10);
+    if (!isNaN(val)) return val;
+  }
   if (process.env.DEFAULT_APP_PORT) {
     const val = parseInt(process.env.DEFAULT_APP_PORT, 10);
     if (!isNaN(val)) return val;
   }
   if (process.env.APP_PORT) {
     const val = parseInt(process.env.APP_PORT, 10);
-    if (!isNaN(val)) return val;
-  }
-  if (process.env.PORT && process.env.PORT !== '8080') {
-    const val = parseInt(process.env.PORT, 10);
     if (!isNaN(val)) return val;
   }
   return 3000;
