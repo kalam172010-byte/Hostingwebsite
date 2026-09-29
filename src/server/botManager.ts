@@ -1,7 +1,7 @@
 import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { HostedPythonBot, HostedProject } from '../types';
 
 const require = createRequire(import.meta.url);
@@ -211,7 +211,7 @@ export async function notifyUserOfBotError(botInfo: HostedPythonBot, errorDetail
       `📁 <b>Entry File:</b> <code>${botInfo.entryFile}</code>\n\n` +
       `❌ <b>Error Traceback / Details:</b>\n` +
       `<pre><code>${cleanErrorMsg}</code></pre>\n\n` +
-      `💡 <i>Please fix the syntax or error in your script and re-upload the file! (Daily limit: 2 files)</i>`,
+      `💡 <i>You can update your script, set environment variables (/env), or re-upload your bot file anytime!</i>`,
       {
         parse_mode: 'HTML',
         reply_markup: {
@@ -755,6 +755,31 @@ export async function deployPythonBotFromFile(
   };
 
   hostedPythonBots.unshift(botInfo);
+
+  // Scan python code for imported libraries and install if missing
+  try {
+    const importRegex = /(?:^|\n)\s*(?:import|from)\s+([a-zA-Z0-9_]+)/g;
+    const foundModules = new Set<string>();
+    let m;
+    while ((m = importRegex.exec(cleanCode)) !== null) {
+      if (m[1]) foundModules.add(m[1]);
+    }
+    const standardLibs = new Set(['os', 'sys', 'time', 'datetime', 'json', 'math', 'random', 'asyncio', 'logging', 're', 'sqlite3', 'urllib', 'hashlib', 'base64', 'typing', 'collections', 'itertools', 'functools', 'string', 'threading', 'subprocess', 'shutil', 'pathlib']);
+    for (const mod of foundModules) {
+      if (!standardLibs.has(mod)) {
+        const pkg = PACKAGE_ALIAS_MAP[mod] || mod;
+        try {
+          const testProc = spawnSync('python3', ['-c', `import ${mod}`]);
+          if (testProc.status !== 0) {
+            botInfo.logs.push(`[SYSTEM] Auto-installing missing library "${pkg}" for ${mod}...`);
+            spawnSync('python3', ['-m', 'pip', 'install', '--break-system-packages', pkg]);
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (e: any) {
+    botInfo.logs.push(`[SYSTEM WARNING] Pre-scan imports warning: ${e.message}`);
+  }
 
   // Immediately spawn background execution
   spawnPythonBotProcess(botInfo);
@@ -1955,11 +1980,25 @@ export async function startRealBot(config: {
         const localSavedPath = path.join(downloadDir, fileName);
         fs.writeFileSync(localSavedPath, buffer);
 
-        // 1. PYTHON SCRIPT (.py) -> Deploy 24/7 Python Bot Runtime
-        if (ext === '.py') {
-          const pyCode = buffer.toString('utf-8');
+        // 1. PYTHON SCRIPT (.py, .pyw, text/x-python, or plain text containing python code) -> Deploy 24/7 Python Bot Runtime
+        const bufferText = buffer.toString('utf-8');
+        const isPyExt = ext === '.py' || ext === '.pyw' || ext === '.pyd';
+        const isPyMime = mimeType === 'text/x-python' || mimeType === 'application/x-python-code';
+        const isPyContent = (ext === '.txt' || ext === '' || !ext) && (
+          bufferText.includes('import telebot') ||
+          bufferText.includes('import telethon') ||
+          bufferText.includes('import aiogram') ||
+          bufferText.includes('import telegram') ||
+          bufferText.includes('from telethon') ||
+          bufferText.includes('from telegram') ||
+          bufferText.includes('from aiogram') ||
+          (bufferText.includes('def ') && bufferText.includes(':'))
+        );
+
+        if (isPyExt || isPyMime || isPyContent) {
+          const pyCode = bufferText;
           const deployedBot = await deployPythonBotFromFile(pyCode, {
-            name: fileName,
+            name: isPyExt ? fileName : `${fileName}.py`,
             originalFileName: fileName,
             senderUsername,
             senderId,
