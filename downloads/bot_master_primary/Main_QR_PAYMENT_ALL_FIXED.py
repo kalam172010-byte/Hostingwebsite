@@ -195,7 +195,6 @@ def get_emoji_icon(slot: str, default_id: str = None) -> str:
 # ==============================================================================
 UI_TEXTS = {
     "start_menu": (
-        "✨ <b>KALAM FF PANEL?</b>\n\n"
         "{product_store} 𝗣𝗥𝗢𝗗𝗨𝗖𝗧 𝗦𝘁𝗼𝗿𝗲 : 𝗮𝗹𝗹 𝗸𝗲𝘆𝘀 𝗣𝘂𝗿𝗰𝗵𝗮𝘀𝗲  & 𝗶𝗻𝘀𝘁𝗮𝗻𝘁𝗹𝘆 𝗱𝗲𝗹𝗶𝘃𝗲𝗿𝘆\n"
         "{profile} 𝗠𝘆 𝗽𝗿𝗼𝗳𝗶𝗹𝗲 : 𝗰𝗵𝗲𝗰𝗸 𝘆𝗼𝘂𝗿 𝗮𝗰𝗰𝗼𝘂𝗻𝘁 𝗶𝗻𝗳𝗼𝗿𝗺𝗮𝘁𝗶𝗼𝗻\n"
         "{add_balance} 𝗔𝗱𝗱 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 : 𝗱𝗲𝗽𝗼𝘀𝗶𝘁𝗲 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 & 𝘀𝗲𝗰𝘂𝗿𝗲 𝘀𝗲𝗿𝘃𝗶𝗰𝗲\n"
@@ -1145,9 +1144,71 @@ async def cmd_start(message: Message, state: FSMContext):
     log_activity(message.from_user.id, "CMD_START")
     await send_main_menu(message)
 
+cached_bot_title = None
+
+async def get_bot_display_name() -> str:
+    global cached_bot_title
+    if cached_bot_title:
+        return cached_bot_title
+    try:
+        me = await bot.get_me()
+        if me:
+            name = (me.first_name or "").strip()
+            if name.lower().endswith(" bot"):
+                name = name[:-4].strip()
+            elif name.lower() == "bot":
+                raw_u = (me.username or BOT_USERNAME or "").lstrip("@")
+                if raw_u.lower().endswith("bot"):
+                    raw_u = raw_u[:-3]
+                name = raw_u.replace("_", " ").strip()
+            cached_bot_title = name.strip() or "AKASH FF PANEL"
+            return cached_bot_title
+    except Exception:
+        pass
+    return "AKASH FF PANEL"
+
 async def send_main_menu(ctx: Any):
-    text = get_ui_text("start_menu")
-    kb = main_menu_kb(ctx.from_user.id)
+    user_id = ctx.from_user.id
+    u = db_query("SELECT first_name, username, balance, is_reseller, is_vip, account_type FROM users WHERE user_id=?", (user_id,), fetchone=True)
+    
+    first_name = html.escape(u[0] if (u and u[0]) else (ctx.from_user.first_name or "Valued Member"))
+    raw_user = u[1] if (u and u[1]) else (ctx.from_user.username or "")
+    username_str = f"@{html.escape(raw_user)}" if raw_user else "<i>None</i>"
+    balance = safe_float(u[2]) if u else 0.0
+    
+    is_res = bool(u[3]) if u else False
+    is_v = bool(u[4]) if u else False
+    
+    badge = ""
+    if is_res and is_v: badge = " 👑🌟 [VIP RESELLER]"
+    elif is_res: badge = " 👑 [RESELLER]"
+    elif is_v: badge = " 🌟 [VIP MEMBER]"
+    
+    bot_name = await get_bot_display_name()
+    
+    header = (
+        f"⚡ <b><u>WELCOME TO {html.escape(bot_name.upper())}</u></b> ⚡\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 <b>Name:</b> <b>{first_name}</b>{badge}\n"
+        f"🔗 <b>Username:</b> {username_str}\n"
+        f"💳 <b>Wallet Balance:</b> <b>{fmt_curr(balance)}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+    
+    base_text = get_ui_text("start_menu")
+    if "WELCOME" in base_text or "KALAM" in base_text:
+        text = header + (
+            f"{get_emoji('product_store')} <b>PRODUCT STORE :</b> Instant Keys & Panels\n"
+            f"{get_emoji('profile')} <b>MY PROFILE :</b> Account & Order Vault\n"
+            f"{get_emoji('add_balance')} <b>ADD BALANCE :</b> Fast UPI & QR Deposit\n"
+            f"{get_emoji('tutorial')} <b>TUTORIALS :</b> Setup & Usage Guides\n"
+            f"{get_emoji('support')} <b>SUPPORT :</b> 24/7 Admin Assistance\n\n"
+            f"👇 <i>Select an option below to continue:</i>"
+        )
+    else:
+        text = header + base_text
+        
+    kb = main_menu_kb(user_id)
     if isinstance(ctx, Message): 
         await ctx.answer(text, reply_markup=kb, parse_mode='HTML')
     else: 
