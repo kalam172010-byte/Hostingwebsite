@@ -25,7 +25,10 @@ import {
   Zap,
   Activity,
   Menu,
-  X
+  X,
+  ArrowLeft,
+  ChevronLeft,
+  Home
 } from 'lucide-react';
 
 export default function App() {
@@ -36,13 +39,56 @@ export default function App() {
   const [hostedPythonBots, setHostedPythonBots] = useState<HostedPythonBot[]>([]);
 
   // Default active tab: 'python_bots' for Python Telegram Bot Hosting
-  const [activeNav, setActiveNav] = useState<'python_bots' | 'hosted_sites' | 'dashboard' | 'code' | 'simulator' | 'rules' | 'guide'>('python_bots');
+  type NavOption = 'python_bots' | 'hosted_sites' | 'dashboard' | 'code' | 'simulator' | 'rules' | 'guide';
+  const [activeNav, setActiveNavState] = useState<NavOption>('python_bots');
+  const [navHistory, setNavHistory] = useState<NavOption[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>(INITIAL_BOTS[0].id);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
   const [isEditBotModalOpen, setIsEditBotModalOpen] = useState(false);
   const [editingBot, setEditingBot] = useState<HostedBot | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Seamless navigation with history stack
+  const setActiveNav = (nextNav: NavOption, pushHistory = true) => {
+    if (nextNav === activeNav) return;
+    if (pushHistory) {
+      setNavHistory(prev => [...prev, activeNav]);
+      try {
+        window.history.pushState({ nav: nextNav }, '', `#${nextNav}`);
+      } catch (_) {}
+    }
+    setActiveNavState(nextNav);
+  };
+
+  const handleGoBack = () => {
+    if (navHistory.length > 0) {
+      const prevNav = navHistory[navHistory.length - 1];
+      setNavHistory(h => h.slice(0, -1));
+      setActiveNavState(prevNav);
+      try {
+        window.history.replaceState({ nav: prevNav }, '', `#${prevNav}`);
+      } catch (_) {}
+    } else if (activeNav !== 'python_bots') {
+      setActiveNavState('python_bots');
+    }
+  };
+
+  // Sync with browser native back button
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (e.state && e.state.nav) {
+        setActiveNavState(e.state.nav);
+      } else {
+        const hash = window.location.hash.replace('#', '') as any;
+        if (hash && ['python_bots', 'hosted_sites', 'dashboard', 'code', 'simulator', 'rules', 'guide'].includes(hash)) {
+          setActiveNavState(hash);
+        }
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Auto reconnect if token stored in localStorage and not already running
   useEffect(() => {
@@ -850,6 +896,61 @@ export default function App() {
         )}
       </header>
 
+      {/* Universal Sticky Page Header & Back Bar */}
+      <div className="sticky top-[57px] z-30 bg-slate-950/80 backdrop-blur-lg border-b border-white/10 px-4 md:px-6 py-2.5 transition-all shadow-sm">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {/* Prominent Back Button */}
+            <button
+              onClick={handleGoBack}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-sm ${
+                navHistory.length > 0 || activeNav !== 'python_bots'
+                  ? 'bg-gradient-to-r from-slate-900 to-slate-800 hover:from-cyan-950 hover:to-blue-900 text-cyan-300 border-cyan-500/40 shadow-cyan-950/40 cursor-pointer active:scale-95 hover:border-cyan-400'
+                  : 'bg-slate-900/40 text-slate-500 border-white/5 cursor-not-allowed opacity-50'
+              }`}
+              title="Go Back to Previous Page"
+              disabled={navHistory.length === 0 && activeNav === 'python_bots'}
+            >
+              <ArrowLeft className="w-4 h-4 text-cyan-400" />
+              <span>← Back</span>
+            </button>
+
+            {/* Breadcrumb Navigation Trail */}
+            <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
+              <button 
+                onClick={() => setActiveNav('python_bots')}
+                className="hover:text-cyan-300 transition-colors flex items-center gap-1 font-medium"
+              >
+                <Home className="w-3.5 h-3.5 text-slate-400" />
+                <span>Home</span>
+              </button>
+              <ChevronLeft className="w-3.5 h-3.5 rotate-180 text-slate-600" />
+              <span className="text-cyan-300 font-bold flex items-center gap-1.5 bg-cyan-950/60 px-2.5 py-1 rounded-lg border border-cyan-500/30">
+                {activeNav === 'python_bots' && <><span>🐍</span> Python Telegram Bots</>}
+                {activeNav === 'hosted_sites' && <><span>🌐</span> Web Site Hosting</>}
+                {activeNav === 'dashboard' && <><span>🤖</span> Master Bots Dashboard</>}
+                {activeNav === 'code' && <><span>💻</span> Python Code Studio</>}
+                {activeNav === 'simulator' && <><span>⚡</span> Live Chat Simulator</>}
+                {activeNav === 'rules' && <><span>⚙️</span> Approval Rules Manager</>}
+                {activeNav === 'guide' && <><span>📖</span> VPS & Hosting Guide</>}
+              </span>
+            </div>
+          </div>
+
+          {/* Quick Home Return Button */}
+          {activeNav !== 'python_bots' && (
+            <button
+              onClick={() => setActiveNav('python_bots')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition-all border border-white/10 shadow-sm"
+              title="Return to Home (Python Bots)"
+            >
+              <Home className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden sm:inline">Home</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Main Viewport Container */}
       <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 pb-20 lg:pb-6">
         {activeNav === 'python_bots' && (
@@ -864,7 +965,7 @@ export default function App() {
             onUploadFile={handleUploadPythonFile}
             onDeployCode={handleDeployPythonCode}
             onConnectToken={handleConnectMasterBotToken}
-            onNavigateBack={() => setActiveNav('dashboard')}
+            onNavigateBack={handleGoBack}
           />
         )}
 
@@ -876,7 +977,7 @@ export default function App() {
             onDeleteProject={handleDeleteProject}
             onDeployTemplate={handleDeployTemplate}
             onUploadZip={handleUploadZip}
-            onNavigateBack={() => setActiveNav('dashboard')}
+            onNavigateBack={handleGoBack}
           />
         )}
 
@@ -914,7 +1015,7 @@ export default function App() {
             selectedBotId={selectedBotId}
             onSelectBot={setSelectedBotId}
             onUpdateBotCode={handleUpdateBotCode}
-            onNavigateBack={() => setActiveNav('dashboard')}
+            onNavigateBack={handleGoBack}
           />
         )}
 
@@ -925,7 +1026,7 @@ export default function App() {
             onSelectBot={setSelectedBotId}
             onNewSubmission={handleNewSubmission}
             onUpdateSubmissionStatus={handleUpdateSubmissionStatus}
-            onNavigateBack={() => setActiveNav('dashboard')}
+            onNavigateBack={handleGoBack}
           />
         )}
 
@@ -935,17 +1036,28 @@ export default function App() {
             selectedBotId={selectedBotId}
             onSelectBot={setSelectedBotId}
             onUpdateBotRules={handleUpdateBotRules}
-            onNavigateBack={() => setActiveNav('dashboard')}
+            onNavigateBack={handleGoBack}
           />
         )}
 
         {activeNav === 'guide' && (
-          <HostingGuideView onNavigateBack={() => setActiveNav('dashboard')} />
+          <HostingGuideView onNavigateBack={handleGoBack} />
         )}
       </main>
 
       {/* Floating Glass Bottom Quick Nav Bar for Mobile Phone */}
       <nav className="fixed bottom-3 left-3 right-3 z-40 lg:hidden glass-card rounded-2xl p-1.5 flex items-center justify-around text-xs shadow-2xl border border-white/20">
+        {(navHistory.length > 0 || activeNav !== 'python_bots') && (
+          <button
+            onClick={handleGoBack}
+            className="flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl text-cyan-300 font-bold bg-cyan-950/80 border border-cyan-500/40"
+            title="Go Back"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span className="text-[10px]">Back</span>
+          </button>
+        )}
+
         <button
           onClick={() => setActiveNav('python_bots')}
           className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${

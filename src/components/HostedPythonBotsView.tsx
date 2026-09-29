@@ -65,6 +65,21 @@ export const HostedPythonBotsView: React.FC<HostedPythonBotsViewProps> = ({
   const [tokenTestResult, setTokenTestResult] = useState<{ success: boolean; message: string; username?: string } | null>(null);
   const [showTroubleshooter, setShowTroubleshooter] = useState(false);
 
+  // Close modals on Escape key press
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (selectedBotForLogs) setSelectedBotForLogs(null);
+        if (selectedBotForEnv) setSelectedBotForEnv(null);
+        if (showCodeEditor) setShowCodeEditor(false);
+        if (showTokenModal) setShowTokenModal(false);
+        if (showTroubleshooter) setShowTroubleshooter(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedBotForLogs, selectedBotForEnv, showCodeEditor, showTokenModal, showTroubleshooter]);
+
   const [customBotName, setCustomBotName] = useState('telegram_worker.py');
   const [customBotCode, setCustomBotCode] = useState(`# Telegram Bot Worker (Python 3)
 import sys
@@ -216,11 +231,11 @@ while True:
             {onNavigateBack && (
               <button
                 onClick={onNavigateBack}
-                className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors border border-slate-700 shadow-sm"
-                title="Return to Dashboard"
+                className="px-3.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-cyan-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all border border-cyan-500/30 shadow-md shadow-cyan-950/40 cursor-pointer active:scale-95"
+                title="Go Back"
               >
-                <ArrowLeft className="w-4 h-4" />
-                <span>🔙 Back to Dashboard</span>
+                <ArrowLeft className="w-4 h-4 text-cyan-400" />
+                <span>← Back</span>
               </button>
             )}
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold">
@@ -715,36 +730,53 @@ while True:
 
       {/* Live Terminal Modal */}
       {selectedBotForLogs && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 md:p-8">
-          <div className="bg-slate-950 border border-slate-800 rounded-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden shadow-2xl">
+        <div 
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedBotForLogs(null); }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-3 md:p-6"
+        >
+          <div className="bg-slate-950 border border-slate-800 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden shadow-2xl">
             {/* Header */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-5 h-5 text-blue-400" />
-                <div>
-                  <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                    <span>{selectedBotForLogs.name}</span>
-                    <span className="text-xs text-slate-400 font-mono">({selectedBotForLogs.id})</span>
-                    {selectedBotForLogs.pid && (
-                      <span className="px-1.5 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800 text-[10px]">
-                        PID: {selectedBotForLogs.pid}
-                      </span>
-                    )}
-                  </h3>
+            <div className="p-3.5 md:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900 gap-3">
+              <div className="flex items-center gap-2.5">
+                {/* Prominent Back Button on top left */}
+                <button
+                  onClick={() => setSelectedBotForLogs(null)}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white text-xs font-bold transition-all flex items-center gap-1.5 border border-cyan-500/30 shadow-md shadow-cyan-950/40 cursor-pointer active:scale-95"
+                  title="Back to Bots List (Esc)"
+                >
+                  <ArrowLeft className="w-4 h-4 text-cyan-400" />
+                  <span>← Back to Bots</span>
+                </button>
+
+                <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+                  <Terminal className="w-4 h-4 text-blue-400 hidden sm:block" />
+                  <div>
+                    <h3 className="font-bold text-white text-xs sm:text-sm flex items-center gap-2">
+                      <span className="truncate max-w-[200px] sm:max-w-xs">{selectedBotForLogs.name}</span>
+                      <span className="text-[11px] text-slate-400 font-mono hidden md:inline">({selectedBotForLogs.id})</span>
+                      {selectedBotForLogs.pid && (
+                        <span className="px-1.5 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800 text-[10px]">
+                          PID: {selectedBotForLogs.pid}
+                        </span>
+                      )}
+                    </h3>
+                  </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => onStartBot(selectedBotForLogs.id)}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition flex items-center gap-1"
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition flex items-center gap-1.5 border border-slate-700"
+                  title="Restart bot process"
                 >
-                  <RotateCw className="w-3 h-3" />
-                  <span>Restart</span>
+                  <RotateCw className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Restart</span>
                 </button>
                 <button
                   onClick={() => setSelectedBotForLogs(null)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                  title="Close (Esc)"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -773,10 +805,19 @@ while True:
               )}
             </div>
 
-            {/* Footer */}
-            <div className="p-3 border-t border-slate-900 bg-slate-950 text-xs text-slate-500 flex items-center justify-between">
-              <span>Streaming stdout/stderr live from Linux container</span>
-              <span>Python 3.10 Runtime</span>
+            {/* Footer with Back Button */}
+            <div className="p-3 border-t border-slate-900 bg-slate-950 text-xs text-slate-400 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Streaming live logs &bull; Python 3.10 Runtime</span>
+              </div>
+              <button
+                onClick={() => setSelectedBotForLogs(null)}
+                className="px-3.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 hover:text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/10"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Back</span>
+              </button>
             </div>
           </div>
         </div>

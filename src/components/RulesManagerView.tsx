@@ -78,11 +78,11 @@ export const RulesManagerView: React.FC<RulesManagerViewProps> = ({
           {onNavigateBack && (
             <button
               onClick={onNavigateBack}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors border border-slate-700 shadow-sm"
-              title="Return to Dashboard"
+              className="px-3.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-cyan-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all border border-cyan-500/30 shadow-md shadow-cyan-950/40 cursor-pointer active:scale-95 shrink-0"
+              title="Go Back"
             >
-              <ArrowLeft className="w-4 h-4" />
-              <span>🔙 Back to Dashboard</span>
+              <ArrowLeft className="w-4 h-4 text-cyan-400" />
+              <span>← Back</span>
             </button>
           )}
           <div className="p-2 bg-purple-500/10 border border-purple-500/20 rounded-lg text-purple-400">
