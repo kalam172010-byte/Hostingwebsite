@@ -614,7 +614,9 @@ class AdminStates(StatesGroup):
     add_prod_category = State()
     add_prod_panel_name = State()
     add_prod_new_panel_pid = State()
-    add_prod_plan_input = State()
+    add_prod_plan_disp_name = State()
+    add_prod_bantibhaiya_dur = State()
+    add_prod_prices = State()
     
     edit_prod_field = State()
     wait_for_new_value = State()
@@ -2221,14 +2223,37 @@ async def add_prod_category_selected(call: CallbackQuery, state: FSMContext):
     
     existing_panels = db_query("SELECT DISTINCT panel_name FROM products WHERE category = ? AND panel_name != ''", (category,), fetchall=True)
     kb = InlineKeyboardMarkup(inline_keyboard=[])
+    
     if existing_panels:
         for ep in existing_panels:
             p_name = ep[0]
-            kb.inline_keyboard.append([InlineKeyboardButton(text=f"📁 {p_name} (Existing Panel)", callback_data=f"addprod_pnl_{p_name[:30]}", style="primary")])
+            kb.inline_keyboard.append([InlineKeyboardButton(text=f"📁 {p_name} (Add Plan)", callback_data=f"addprod_pnl_{p_name[:30]}", style="primary")])
+            
+    kb.inline_keyboard.append([InlineKeyboardButton(text="➕ Add New Product / Panel", callback_data="addprod_new_panel_btn", style="success")])
     kb.inline_keyboard.append([InlineKeyboardButton(text="Cancel", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
     
-    hint = "\n\n👇 <b>Select an existing Panel, OR type a new Panel Name in chat:</b>" if existing_panels else "\n\n✍️ <b>Type the new Panel Name in chat (e.g. MST PANEL):</b>"
-    await call.message.edit_text(f"<b>Step 2:</b> Choose or Enter <b>PANEL NAME</b>:{hint}", reply_markup=kb, parse_mode='HTML')
+    if existing_panels:
+        text = (
+            f"📦 <b>Category:</b> {category}\n━━━━━━━━━━━━━━━━━━\n"
+            f"👇 <b>Select an Existing Product to add more plans, OR click 'Add New Product':</b>"
+        )
+    else:
+        text = (
+            f"📦 <b>Category:</b> {category}\n━━━━━━━━━━━━━━━━━━\n"
+            f"No products found in this category.\n"
+            f"Click <b>'➕ Add New Product / Panel'</b> below to create one:"
+        )
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data == "addprod_new_panel_btn")
+async def add_prod_new_panel_btn_clicked(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID: return
+    await call.message.edit_text(
+        "✍️ <b>Enter NEW Product / Panel Name:</b>\n"
+        "(Example: <code>MST PANEL</code>, <code>VIP CHEATS</code>):",
+        reply_markup=admin_back_kb(),
+        parse_mode='HTML'
+    )
     await state.set_state(AdminStates.add_prod_panel_name)
 
 @dp.callback_query(F.data.startswith("addprod_pnl_"))
@@ -2249,19 +2274,12 @@ async def add_prod_panel_selected_btn(call: CallbackQuery, state: FSMContext):
         text = (
             f"📁 Panel: <b>{panel_name}</b>\n"
             f"🔑 Reseller PID: <code>{auto_pid}</code> <i>(Saved for this panel)</i>\n━━━━━━━━━━━━━━━━━━\n"
-            f"⏱ <b>Enter Plan Details (Manual Days & Reseller API Duration):</b>\n\n"
-            f"📝 <b>Format:</b>\n"
-            f"<code>[Days] [User Price] [Reseller Price]</code>\n"
-            f"<i>(OR with separate API Duration):</i>\n"
-            f"<code>[Display Days] | [API Duration] | [User Price] | [Reseller Price]</code>\n\n"
-            f"💡 <b>Examples:</b>\n"
-            f"• <code>7 Days 500 350</code>\n"
-            f"• <code>30 Days 1200 900</code>\n"
-            f"• <code>7 Days | 7 Days | 500 | 350</code>\n"
-            f"• <code>1 Month VIP | 1 Month | 1000 | 700</code>"
+            f"<b>Step 1 of 3:</b> Enter <b>Plan Display Days / Name</b>:\n"
+            f"(Example: <code>7 Days</code>, <code>30 Days</code>, <code>2 Hours</code>, <code>1 Month VIP</code>)\n\n"
+            f"💡 <i>Or send in 1 line: <code>7 Days | 7d | 500 | 350</code></i>"
         )
         await call.message.edit_text(text, reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.add_prod_plan_input)
+        await state.set_state(AdminStates.add_prod_plan_disp_name)
     else:
         text = (
             f"📁 Panel: <b>{panel_name}</b>\n━━━━━━━━━━━━━━━━━━\n"
@@ -2287,18 +2305,12 @@ async def add_prod_panel_name_entered(m: Message, state: FSMContext):
         text = (
             f"📁 Panel: <b>{panel_name}</b>\n"
             f"🔑 Reseller PID: <code>{auto_pid}</code> <i>(Saved for this panel)</i>\n━━━━━━━━━━━━━━━━━━\n"
-            f"⏱ <b>Enter Plan Details (Manual Days & Reseller API Duration):</b>\n\n"
-            f"📝 <b>Format:</b>\n"
-            f"<code>[Days] [User Price] [Reseller Price]</code>\n"
-            f"<i>(OR with separate API Duration):</i>\n"
-            f"<code>[Display Days] | [API Duration] | [User Price] | [Reseller Price]</code>\n\n"
-            f"💡 <b>Examples:</b>\n"
-            f"• <code>7 Days 500 350</code>\n"
-            f"• <code>30 Days 1200 900</code>\n"
-            f"• <code>7 Days | 7 Days | 500 | 350</code>"
+            f"<b>Step 1 of 3:</b> Enter <b>Plan Display Days / Name</b>:\n"
+            f"(Example: <code>7 Days</code>, <code>30 Days</code>, <code>2 Hours</code>, <code>1 Month VIP</code>)\n\n"
+            f"💡 <i>Or send in 1 line: <code>7 Days | 7d | 500 | 350</code></i>"
         )
         await m.answer(text, reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.add_prod_plan_input)
+        await state.set_state(AdminStates.add_prod_plan_disp_name)
     else:
         text = (
             f"📁 New Panel: <b>{panel_name}</b>\n━━━━━━━━━━━━━━━━━━\n"
@@ -2317,35 +2329,23 @@ async def add_prod_new_panel_pid_entered(m: Message, state: FSMContext):
     
     text = (
         f"📁 Panel: <b>{panel_name}</b> (PID: <code>{pid}</code>)\n━━━━━━━━━━━━━━━━━━\n"
-        f"⏱ <b>Enter Plan Details (Manual Days & Reseller API Duration):</b>\n\n"
-        f"📝 <b>Format:</b>\n"
-        f"<code>[Days] [User Price] [Reseller Price]</code>\n"
-        f"<i>(OR with separate API Duration):</i>\n"
-        f"<code>[Display Days] | [API Duration] | [User Price] | [Reseller Price]</code>\n\n"
-        f"💡 <b>Examples:</b>\n"
-        f"• <code>1 Day 100 70</code>\n"
-        f"• <code>7 Days 500 350</code>\n"
-        f"• <code>30 Days 1200 900</code>"
+        f"<b>Step 1 of 3:</b> Enter <b>Plan Display Days / Name</b> in Store:\n"
+        f"(Example: <code>1 Day</code>, <code>7 Days</code>, <code>30 Days</code>)\n\n"
+        f"💡 <i>Or send all in 1 line: <code>7 Days | 7d | 500 | 350</code></i>"
     )
     await m.answer(text, reply_markup=admin_back_kb(), parse_mode='HTML')
-    await state.set_state(AdminStates.add_prod_plan_input)
+    await state.set_state(AdminStates.add_prod_plan_disp_name)
 
-@dp.message(AdminStates.add_prod_plan_input)
-async def add_prod_plan_input(m: Message, state: FSMContext):
+@dp.message(AdminStates.add_prod_plan_disp_name)
+async def add_prod_plan_disp_name_entered(m: Message, state: FSMContext):
+    raw_text = m.text.strip()
     data = await state.get_data()
     cat = data.get('cat', 'ANDROID NON ROOT PANEL')
     panel_name = data.get('panel_name', 'General')
     bb_pid = data.get('auto_pid', '')
     auto_apk = data.get('auto_apk', '')
     
-    raw_text = m.text.strip()
-    disp_name = ""
-    api_dur = ""
-    price = 0.0
-    reseller_price = 0.0
-    apk_link = auto_apk
-    
-    # Method 1: Pipe separated '|'
+    # Check if single line pipe format
     if '|' in raw_text:
         parts = [p.strip() for p in raw_text.split('|') if p.strip()]
         if len(parts) >= 3:
@@ -2360,60 +2360,69 @@ async def add_prod_plan_input(m: Message, state: FSMContext):
                     reseller_price = float(p_parts[1])
                 else:
                     reseller_price = round(price * 0.7, 2)
-                if len(parts) >= 5: apk_link = parts[4]
+                apk_link = parts[4] if len(parts) >= 5 else auto_apk
+                
+                return await save_new_plan_db(m, state, cat, panel_name, bb_pid, disp_name, api_dur, price, reseller_price, apk_link)
             except ValueError:
-                return await m.answer("❌ Invalid Price! Example: <code>7 Days | 7 Days | 500 | 350</code>", parse_mode='HTML')
+                pass
     
-    # Method 2: Multiple lines
-    if not disp_name:
-        lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
-        if len(lines) == 3:
-            disp_name = lines[0]
-            api_dur = lines[1]
-            p_parts = lines[2].split()
-            try:
-                price = float(p_parts[0])
-                reseller_price = float(p_parts[1]) if len(p_parts) > 1 and p_parts[1].replace('.','',1).isdigit() else round(price * 0.7, 2)
-                if len(p_parts) > 2: apk_link = p_parts[2]
-            except ValueError:
-                return await m.answer("❌ Invalid Price! Example:\n7 Days\n7 Days\n500 350", parse_mode='HTML')
-        elif len(lines) == 2:
-            disp_name = lines[0]
-            api_dur = lines[0]
-            p_parts = lines[1].split()
-            try:
-                price = float(p_parts[0])
-                reseller_price = float(p_parts[1]) if len(p_parts) > 1 and p_parts[1].replace('.','',1).isdigit() else round(price * 0.7, 2)
-                if len(p_parts) > 2: apk_link = p_parts[2]
-            except ValueError:
-                return await m.answer("❌ Invalid Price! Example:\n7 Days\n500 350", parse_mode='HTML')
+    disp_name = raw_text
+    await state.update_data(disp_name=disp_name)
     
-    # Method 3: Space separated tokens
-    if not disp_name:
-        tokens = raw_text.split()
-        if len(tokens) < 2:
-            return await m.answer("❌ Please enter both Duration and Price.\n\nExample: <code>7 Days 500 350</code>", parse_mode='HTML')
-            
-        if tokens[-1].startswith("http://") or tokens[-1].startswith("https://") or tokens[-1].startswith("t.me/"):
-            apk_link = tokens.pop()
-            
-        if len(tokens) >= 3 and tokens[-1].replace('.','',1).isdigit() and tokens[-2].replace('.','',1).isdigit():
-            reseller_price = float(tokens.pop())
-            price = float(tokens.pop())
-        elif len(tokens) >= 2 and tokens[-1].replace('.','',1).isdigit():
-            price = float(tokens.pop())
-            reseller_price = round(price * 0.7, 2)
-        else:
-            return await m.answer("❌ Could not find Price! Example: <code>7 Days 500 350</code>", parse_mode='HTML')
-            
-        dur = " ".join(tokens)
-        disp_name = dur
-        api_dur = dur
+    text = (
+        f"📅 Plan Display Days: <b>{disp_name}</b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"<b>Step 2 of 3:</b> Enter exact <b>Bantibhaiya Reseller API Duration</b> parameter:\n"
+        f"<i>(பண்டி பையா API கேட்கும் குறிப்பிட்ட டுரேஷன் கோடை உள்ளிடவும்)</i>\n\n"
+        f"💡 <b>Examples:</b> <code>7 Days</code>, <code>7d</code>, <code>1week</code>, <code>30d</code>, <code>1 Month</code>, <code>24h</code>, <code>season1</code>"
+    )
+    await m.answer(text, reply_markup=admin_back_kb(), parse_mode='HTML')
+    await state.set_state(AdminStates.add_prod_bantibhaiya_dur)
+
+@dp.message(AdminStates.add_prod_bantibhaiya_dur)
+async def add_prod_bantibhaiya_dur_entered(m: Message, state: FSMContext):
+    api_dur = m.text.strip()
+    await state.update_data(api_dur=api_dur)
+    data = await state.get_data()
+    disp_name = data.get('disp_name', '7 Days')
+    
+    text = (
+        f"📅 Plan: <b>{disp_name}</b> | ⏱ API Duration: <code>{api_dur}</code>\n━━━━━━━━━━━━━━━━━━\n"
+        f"<b>Step 3 of 3:</b> Enter <b>User Price & Reseller Price (₹)</b>:\n\n"
+        f"📝 <b>Format:</b> <code>[UserPrice] [ResellerPrice]</code>\n"
+        f"💡 <b>Examples:</b>\n"
+        f"• <code>500 350</code> <i>(User ₹500, Reseller ₹350)</i>\n"
+        f"• <code>500</code> <i>(User ₹500, Reseller auto 70%)</i>"
+    )
+    await m.answer(text, reply_markup=admin_back_kb(), parse_mode='HTML')
+    await state.set_state(AdminStates.add_prod_prices)
+
+@dp.message(AdminStates.add_prod_prices)
+async def add_prod_prices_entered(m: Message, state: FSMContext):
+    data = await state.get_data()
+    cat = data.get('cat', 'ANDROID NON ROOT PANEL')
+    panel_name = data.get('panel_name', 'General')
+    bb_pid = data.get('auto_pid', '')
+    auto_apk = data.get('auto_apk', '')
+    disp_name = data.get('disp_name', '7 Days')
+    api_dur = data.get('api_dur', '7 Days')
+    
+    tokens = m.text.strip().split()
+    if not tokens:
+        return await m.answer("❌ Please enter the price (e.g. <code>500 350</code>).", parse_mode='HTML')
         
-    if not disp_name:
-        disp_name = "1 Day"
-    if not api_dur:
-        api_dur = disp_name
+    apk_link = auto_apk
+    if tokens[-1].startswith("http://") or tokens[-1].startswith("https://") or tokens[-1].startswith("t.me/"):
+        apk_link = tokens.pop()
+        
+    try:
+        price = float(tokens[0])
+        reseller_price = float(tokens[1]) if len(tokens) > 1 and tokens[1].replace('.','',1).isdigit() else round(price * 0.7, 2)
+    except ValueError:
+        return await m.answer("❌ Invalid numerical price! Example: <code>500 350</code>", parse_mode='HTML')
+        
+    await save_new_plan_db(m, state, cat, panel_name, bb_pid, disp_name, api_dur, price, reseller_price, apk_link)
+
+async def save_new_plan_db(m: Message, state: FSMContext, cat: str, panel_name: str, bb_pid: str, disp_name: str, api_dur: str, price: float, reseller_price: float, apk_link: str):
     if apk_link and apk_link.lower() == 'none':
         apk_link = ""
         
@@ -2434,14 +2443,14 @@ async def add_prod_plan_input(m: Message, state: FSMContext):
     await m.answer(
         f"🎉 <b>Plan Successfully Added!</b>\n━━━━━━━━━━━━━━━━━━\n"
         f"📦 <b>Category:</b> {cat}\n"
-        f"📁 <b>Panel:</b> {panel_name}\n"
+        f"📁 <b>Panel Name:</b> {panel_name}\n"
         f"🔑 <b>Panel PID:</b> <code>{bb_pid}</code>\n"
-        f"📅 <b>Plan Display Days:</b> <b>{disp_name}</b>\n"
+        f"📅 <b>Store Display Name:</b> <b>{disp_name}</b>\n"
         f"⏱ <b>Bantibhaiya API Duration:</b> <code>{api_dur}</code>\n"
         f"💰 <b>User Price:</b> {fmt_curr(price)}\n"
         f"👑 <b>Reseller Price:</b> {fmt_curr(reseller_price)}\n"
         f"📥 <b>APK Link:</b> {apk_link or 'None'}\n\n"
-        f"⚡ <i>Customers can now buy the <b>{disp_name}</b> plan instantly!</i>",
+        f"⚡ <i>Customers buying this plan will trigger Bantibhaiya API with Duration: <code>{api_dur}</code>!</i>",
         reply_markup=kb,
         parse_mode='HTML'
     )
