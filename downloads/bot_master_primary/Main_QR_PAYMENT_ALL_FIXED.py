@@ -195,12 +195,12 @@ def get_emoji_icon(slot: str, default_id: str = None) -> str:
 # ==============================================================================
 UI_TEXTS = {
     "start_menu": (
-        "{product_store} 𝗣𝗥𝗢𝗗𝗨𝗖𝗧 𝗦𝘁𝗼𝗿𝗲 : 𝗮𝗹𝗹 𝗸𝗲𝘆𝘀 𝗣𝘂𝗿𝗰𝗵𝗮𝘀𝗲  & 𝗶𝗻𝘀𝘁𝗮𝗻𝘁𝗹𝘆 𝗱𝗲𝗹𝗶𝘃𝗲𝗿𝘆\n"
-        "{profile} 𝗠𝘆 𝗽𝗿𝗼𝗳𝗶𝗹𝗲 : 𝗰𝗵𝗲𝗰𝗸 𝘆𝗼𝘂𝗿 𝗮𝗰𝗰𝗼𝘂𝗻𝘁 𝗶𝗻𝗳𝗼𝗿𝗺𝗮𝘁𝗶𝗼𝗻\n"
-        "{add_balance} 𝗔𝗱𝗱 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 : 𝗱𝗲𝗽𝗼𝘀𝗶𝘁𝗲 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 & 𝘀𝗲𝗰𝘂𝗿𝗲 𝘀𝗲𝗿𝘃𝗶𝗰𝗲\n"
-        "{history} 𝗔𝗹𝗹 𝗵𝗶𝘀𝘁𝗼𝗿𝘆 : 𝗰𝗵𝗲𝗰𝗸 𝗮𝗹𝗹 𝗽𝘂𝗿𝗰𝗵𝗮𝘀𝗲 𝗵𝗶𝘀𝘁𝗼𝗿𝘆\n"
-        "{tutorial} 𝗧𝘂𝘁𝗼𝗿𝗶𝗮𝗹 : 𝘃𝗶𝗲𝘄 𝘁𝘂𝘁𝗼𝗿𝗶𝗮𝗹 & 𝘄𝗼𝗿𝗸 𝘁𝗵𝗶𝘀 𝗯𝗼𝘁\n"
-        "{support} 𝗦𝘂𝗽𝗽𝗼𝗿𝘁 : 𝗯𝗼𝘁 𝗽𝗿𝗼𝗯𝗹𝗲𝗺 𝘀𝗼𝗹𝘃𝗲𝗱 𝗳𝗼𝗿 𝘀𝘂𝗽𝗽𝗼𝗿𝘁 𝗮𝗱𝗺𝗶𝗻\n"
+        "{product_store} <b>PRODUCT STORE :</b> Instant Keys & Panels\n"
+        "{profile} <b>MY PROFILE :</b> Account & Order Vault\n"
+        "{add_balance} <b>ADD BALANCE :</b> Fast UPI & QR Deposit\n"
+        "{tutorial} <b>TUTORIALS :</b> Setup & Usage Guides\n"
+        "{support} <b>SUPPORT :</b> 24/7 Admin Assistance\n\n"
+        "👇 <i>Select an option below to continue:</i>"
     ),
     "vip_menu": (
         "🌟 <b><u>VIP MEMBERSHIP CLUB</u></b> 🌟\n\n"
@@ -223,6 +223,15 @@ UI_TEXTS = {
 
 def get_ui_text(key: str, **kwargs) -> str:
     val = db_query("SELECT value FROM settings WHERE key=?", (f"ui_{key}",), fetchone=True)
+    if not val or not val[0]:
+        alias_map = {
+            "start_menu": "ui_start",
+            "vip_menu": "ui_vip",
+            "add_balance_menu": "ui_add_balance"
+        }
+        if key in alias_map:
+            val = db_query("SELECT value FROM settings WHERE key=?", (alias_map[key],), fetchone=True)
+            
     template = val[0] if val and val[0] else UI_TEXTS.get(key, "")
 
     emoji_map = {
@@ -466,10 +475,13 @@ def migrate_categories() -> None:
     for slot, emoji_id in DEFAULT_EMOJIS.items():
         set_setting(f"emoji_{slot}", emoji_id)
     
-    # Force update UI texts
+    # Force update UI texts directly in database
     set_setting("ui_start_menu", UI_TEXTS['start_menu'])
+    set_setting("ui_start", UI_TEXTS['start_menu'])
     set_setting("ui_add_balance_menu", UI_TEXTS['add_balance_menu'])
+    set_setting("ui_add_balance", UI_TEXTS['add_balance_menu'])
     set_setting("ui_vip_menu", UI_TEXTS['vip_menu'])
+    set_setting("ui_vip", UI_TEXTS['vip_menu'])
     logger.info("UI texts and emojis updated with new placeholders and IDs.")
     
     # Fix any corrupted price columns (one-time cleanup)
@@ -1195,18 +1207,8 @@ async def send_main_menu(ctx: Any):
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     )
     
-    base_text = get_ui_text("start_menu")
-    if "WELCOME" in base_text or "KALAM" in base_text:
-        text = header + (
-            f"{get_emoji('product_store')} <b>PRODUCT STORE :</b> Instant Keys & Panels\n"
-            f"{get_emoji('profile')} <b>MY PROFILE :</b> Account & Order Vault\n"
-            f"{get_emoji('add_balance')} <b>ADD BALANCE :</b> Fast UPI & QR Deposit\n"
-            f"{get_emoji('tutorial')} <b>TUTORIALS :</b> Setup & Usage Guides\n"
-            f"{get_emoji('support')} <b>SUPPORT :</b> 24/7 Admin Assistance\n\n"
-            f"👇 <i>Select an option below to continue:</i>"
-        )
-    else:
-        text = header + base_text
+    base_text = get_ui_text("start_menu", bot_name=bot_name, name=first_name, username=username_str, balance=fmt_curr(balance))
+    text = header + base_text
         
     kb = main_menu_kb(user_id)
     if isinstance(ctx, Message): 
@@ -2544,9 +2546,9 @@ async def save_emoji_slot(m: Message, state: FSMContext):
 async def admin_edit_ui_menu(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID: return
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Edit Start Menu Text", callback_data="edit_ui_start", style="primary")],
-        [InlineKeyboardButton(text="Edit VIP Menu Text", callback_data="edit_ui_vip", style="primary")],
-        [InlineKeyboardButton(text="Edit Add Balance Text", callback_data="edit_ui_add_balance", style="primary")],
+        [InlineKeyboardButton(text="Edit Start Menu Text", callback_data="edit_ui_start_menu", style="primary")],
+        [InlineKeyboardButton(text="Edit VIP Menu Text", callback_data="edit_ui_vip_menu", style="primary")],
+        [InlineKeyboardButton(text="Edit Add Balance Text", callback_data="edit_ui_add_balance_menu", style="primary")],
         [InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
     ])
     await call.message.edit_text("✏️ <b>Edit User Interface Texts</b>\nSelect which text you want to modify:", reply_markup=kb, parse_mode='HTML')
@@ -2554,7 +2556,10 @@ async def admin_edit_ui_menu(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("edit_ui_"))
 async def admin_edit_ui_prompt(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
-    ui_key = call.data.split("_")[2]
+    ui_key = call.data.split("edit_ui_", 1)[1]
+    if ui_key == "start": ui_key = "start_menu"
+    elif ui_key == "vip": ui_key = "vip_menu"
+    elif ui_key == "add_balance": ui_key = "add_balance_menu"
     await state.update_data(ui_key=ui_key)
     current_text = get_ui_text(ui_key)
     await call.message.edit_text(f"📝 Send the new text for <b>{ui_key.upper()}</b> menu.\n\nCurrent text:\n{current_text}", reply_markup=admin_back_kb(), parse_mode='HTML')
@@ -2564,9 +2569,15 @@ async def admin_edit_ui_prompt(call: CallbackQuery, state: FSMContext):
 async def admin_save_ui_text(m: Message, state: FSMContext):
     data = await state.get_data()
     ui_key = data['ui_key']
-    new_text = m.text
+    new_text = m.text.strip()
     db_query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (f"ui_{ui_key}", new_text))
-    await m.answer(f"✅ UI text <b>{ui_key}</b> updated successfully!", reply_markup=admin_kb(), parse_mode='HTML')
+    if ui_key == "start_menu":
+        db_query("INSERT OR REPLACE INTO settings (key, value) VALUES ('ui_start', ?)", (new_text,))
+    elif ui_key == "vip_menu":
+        db_query("INSERT OR REPLACE INTO settings (key, value) VALUES ('ui_vip', ?)", (new_text,))
+    elif ui_key == "add_balance_menu":
+        db_query("INSERT OR REPLACE INTO settings (key, value) VALUES ('ui_add_balance', ?)", (new_text,))
+    await m.answer(f"✅ UI text for <b>{ui_key}</b> updated successfully!", reply_markup=admin_kb(), parse_mode='HTML')
     await state.clear()
 
 @dp.callback_query(F.data == "admin_edit_reseller_price")
