@@ -42,7 +42,7 @@ export default function App() {
   type NavOption = 'python_bots' | 'hosted_sites' | 'dashboard' | 'code' | 'simulator' | 'rules' | 'guide';
   const [activeNav, setActiveNavState] = useState<NavOption>('python_bots');
   const [navHistory, setNavHistory] = useState<NavOption[]>([]);
-  const [selectedBotId, setSelectedBotId] = useState<string>(INITIAL_BOTS[0].id);
+  const [selectedBotId, setSelectedBotId] = useState<string>(INITIAL_BOTS[0]?.id || '');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
   const [isEditBotModalOpen, setIsEditBotModalOpen] = useState(false);
@@ -141,7 +141,7 @@ export default function App() {
     fetchHostedPythonBots();
     fetchHostedProjects();
 
-    const interval = setInterval(async () => {
+    const syncStatus = async () => {
       try {
         const res = await fetch('/api/bots/status');
         if (res.ok) {
@@ -187,9 +187,29 @@ export default function App() {
       } catch (e) {
         // Silently handle polling glitch
       }
-    }, 2500);
+    };
 
-    return () => clearInterval(interval);
+    const interval = setInterval(syncStatus, 2500);
+
+    // Instant Wakeup / Inactivity Reconnect Watcher
+    const handleWakeup = () => {
+      if (document.visibilityState === 'visible') {
+        syncStatus();
+        fetchHostedPythonBots();
+        fetchHostedProjects();
+      }
+    };
+
+    window.addEventListener('focus', handleWakeup);
+    window.addEventListener('online', handleWakeup);
+    document.addEventListener('visibilitychange', handleWakeup);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleWakeup);
+      window.removeEventListener('online', handleWakeup);
+      document.removeEventListener('visibilitychange', handleWakeup);
+    };
   }, []);
 
   // Python Bot Controls: Start / Restart

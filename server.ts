@@ -28,6 +28,7 @@ import {
   setServerBaseUrl,
   getSystemStats,
   updatePythonBotEnv,
+  getPythonBotScriptPath,
   resetDailyUploadLimit
 } from './src/server/botManager';
 
@@ -283,6 +284,15 @@ app.post('/api/python-bots/:id/env', (req, res) => {
   }
   const success = updatePythonBotEnv(req.params.id, key, value || '');
   res.json({ success });
+});
+
+// Download Python Bot File (.py / .zip)
+app.get('/api/python-bots/:id/download', (req, res) => {
+  const botInfo = getPythonBotScriptPath(req.params.id);
+  if (!botInfo || !fs.existsSync(botInfo.filePath)) {
+    return res.status(404).json({ error: 'Bot file not found on server.' });
+  }
+  res.download(botInfo.filePath, botInfo.fileName);
 });
 
 // System Hardware & Cloud Server Metrics
@@ -722,6 +732,19 @@ async function startServer() {
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[TeleHost] Server listening on http://0.0.0.0:${PORT}`);
   });
+
+  // Optimize keep-alive timeouts for cloud proxy / container longevity
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+
+  // 24/7 Keep-Alive Self-Ping Heartbeat (prevents scale-to-zero, socket drops & idle freezing)
+  setInterval(() => {
+    try {
+      fetch(`http://127.0.0.1:${PORT}/api/health`)
+        .then(() => {})
+        .catch(() => {});
+    } catch (_) {}
+  }, 25000);
 
   server.on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {

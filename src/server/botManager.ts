@@ -2,8 +2,10 @@ import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';
 import { spawn, spawnSync } from 'child_process';
+import { GoogleGenAI } from '@google/genai';
 import { HostedPythonBot, HostedProject } from '../types';
 
+const ai = new GoogleGenAI();
 const require = createRequire(import.meta.url);
 
 function getConstructor(moduleOrClass: any): any {
@@ -147,6 +149,7 @@ const pythonBotsManifestPath = path.join(hostedPythonBotsDir, 'manifest.json');
 const hostedSitesManifestPath = path.join(hostedSitesRootDir, 'manifest.json');
 const submissionsManifestPath = path.join(downloadsRootDir, 'manifest.json');
 const dailyUploadsManifestPath = path.join(downloadsRootDir, 'daily_uploads.json');
+const masterBotsManifestPath = path.join(downloadsRootDir, 'master_bots.json');
 const userDailyUploads = new Map<string, number>();
 
 export function saveDailyUploadsManifest() {
@@ -262,6 +265,10 @@ export function saveManifests() {
     fs.writeFileSync(pythonBotsManifestPath, JSON.stringify(hostedPythonBots, null, 2), 'utf-8');
     fs.writeFileSync(hostedSitesManifestPath, JSON.stringify(hostedProjects, null, 2), 'utf-8');
     fs.writeFileSync(submissionsManifestPath, JSON.stringify(liveSubmissions, null, 2), 'utf-8');
+    
+    // Persist Master Bots
+    const masterBotsList = Array.from(activeBots.values()).map(b => b.info);
+    fs.writeFileSync(masterBotsManifestPath, JSON.stringify(masterBotsList, null, 2), 'utf-8');
   } catch (err) {
     console.error('[Manifest Save Error]', err);
   }
@@ -300,6 +307,40 @@ export function loadManifests() {
       }
     }
     loadDailyUploadsManifest();
+
+    // Auto-resume Hosted Python Bots on boot
+    hostedPythonBots.forEach(b => {
+      if (b.status === 'RUNNING' || b.autoRestartEnabled !== false) {
+        console.log(`[Boot] Auto-resuming Python Bot "${b.name}" (${b.id})...`);
+        setTimeout(() => {
+          spawnPythonBotProcess(b);
+        }, 1000);
+      }
+    });
+
+    // Auto-resume Master Bots if configured
+    if (fs.existsSync(masterBotsManifestPath)) {
+      try {
+        const savedMasters = JSON.parse(fs.readFileSync(masterBotsManifestPath, 'utf-8'));
+        if (Array.isArray(savedMasters)) {
+          savedMasters.forEach(b => {
+            if (b.token && b.status === 'RUNNING') {
+              console.log(`[Boot] Auto-resuming Master Telegram Bot @${b.botUsername || b.name}...`);
+              startRealBot({
+                id: b.id,
+                name: b.name,
+                token: b.token,
+                adminChatId: b.adminChatId,
+                downloadPath: b.downloadPath,
+                rules: b.rules
+              }).catch(e => {
+                console.warn('[Auto-resume Master Bot Warning]', e.message);
+              });
+            }
+          });
+        }
+      } catch (_) {}
+    }
   } catch (err) {
     console.error('[Manifest Load Error]', err);
   }
@@ -470,10 +511,103 @@ const PACKAGE_ALIAS_MAP: Record<string, string> = {
   uvicorn: 'uvicorn',
   requests: 'requests',
   aiohttp: 'aiohttp',
+  httpx: 'httpx',
   pydantic: 'pydantic',
   pytz: 'pytz',
-  dateutil: 'python-dateutil'
+  dateutil: 'python-dateutil',
+  colorama: 'colorama',
+  rich: 'rich',
+  tabulate: 'tabulate',
+  pymongo: 'pymongo',
+  motor: 'motor',
+  redis: 'redis',
+  sqlalchemy: 'SQLAlchemy',
+  nest_asyncio: 'nest_asyncio',
+  psutil: 'psutil',
+  cryptography: 'cryptography'
 };
+
+export async function healPythonCodeWithAI(
+  code: string,
+  errorTraceback: string
+): Promise<{ success: boolean; healedCode?: string; explanation?: string }> {
+  try {
+    const prompt = `You are an expert Python engineer and compiler assistant.
+A Python Telegram bot crashed or failed with this error:
+--- ERROR TRACEBACK ---
+${errorTraceback.slice(-1500)}
+--- END ERROR TRACEBACK ---
+
+Here is the source Python file:
+--- PYTHON SOURCE CODE ---
+${code}
+--- END PYTHON SOURCE CODE ---
+
+TASK:
+Fix the syntax errors, unescaped f-string quotes, indentation, missing imports, unhandled exceptions, or event-loop conflicts so this Python script runs smoothly without crashing.
+CRITICAL RULES:
+1. Return ONLY the complete, executable Python code.
+2. DO NOT wrap in markdown \`\`\` blocks.
+3. Preserve all original bot commands, token logic, message handlers, and feature logic.
+4. Ensure all required imports (os, sys, json, time, asyncio, telebot/aiogram/telethon, etc.) are present.
+`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+    });
+
+    let healedText = response.text ? response.text.trim() : '';
+    if (healedText.startsWith('```python')) {
+      healedText = healedText.replace(/^```python\s*/i, '').replace(/```$/i, '').trim();
+    } else if (healedText.startsWith('```')) {
+      healedText = healedText.replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+    }
+
+    if (healedText && healedText.length > 20) {
+      return {
+        success: true,
+        healedCode: healedText,
+        explanation: 'AI intelligent repair resolved syntax/runtime exceptions'
+      };
+    }
+  } catch (err: any) {
+    console.warn('[TeleHost AI Auto-Healer Warning]', err?.message || err);
+  }
+  return { success: false };
+}
+
+export function autoInstallMissingModulesFromCode(code: string, botLogs?: string[]): void {
+  const importLines = code.match(/^(?:from\s+([a-zA-Z0-9_]+)|import\s+([a-zA-Z0-9_]+))/gm) || [];
+  const standardLibs = new Set([
+    'os', 'sys', 'json', 'time', 'datetime', 'math', 'random', 're', 'asyncio',
+    'logging', 'sqlite3', 'urllib', 'http', 'subprocess', 'threading', 'collections',
+    'typing', 'itertools', 'functools', 'pathlib', 'shutil', 'tempfile', 'zipfile',
+    'tarfile', 'hashlib', 'base64', 'csv', 'io', 'socket', 'ssl', 'inspect', 'traceback',
+    'uuid', 'copy', 'string', 'struct', 'enum', 'glob', 'platform', 'signal'
+  ]);
+
+  const detectedPackages = new Set<string>();
+  for (const line of importLines) {
+    const fromMatch = line.match(/^from\s+([a-zA-Z0-9_]+)/);
+    const importMatch = line.match(/^import\s+([a-zA-Z0-9_]+)/);
+    const mod = (fromMatch ? fromMatch[1] : (importMatch ? importMatch[1] : '')).trim();
+    if (mod && !standardLibs.has(mod)) {
+      const pkg = PACKAGE_ALIAS_MAP[mod] || mod;
+      detectedPackages.add(pkg);
+    }
+  }
+
+  for (const pkg of detectedPackages) {
+    try {
+      if (botLogs) botLogs.push(`[AUTO-DEPENDENCY] 📦 Ensuring library "${pkg}" is installed...`);
+      const pip = spawnSync('python3', ['-m', 'pip', 'install', '--break-system-packages', '--quiet', pkg], { timeout: 30000 });
+      if (pip.status === 0 && botLogs) {
+        botLogs.push(`[AUTO-DEPENDENCY] ✅ Library "${pkg}" verified.`);
+      }
+    } catch (_) {}
+  }
+}
 
 export function fixPythonFStringNestedQuotes(code: string): string {
   const lines = code.split('\n');
@@ -538,11 +672,46 @@ export function sanitizeAndFixPythonCode(rawCode: string): string {
   // Upgrade standard telebot bot.polling() to infinity_polling so network blips never crash the bot
   if (code.includes('import telebot') || code.includes('from telebot import')) {
     code = code.replace(/\bbot\.polling\s*\([^)]*\)/g, 'bot.infinity_polling(timeout=25, long_polling_timeout=25)');
+    
+    // If telebot is instantiated but neither polling nor infinity_polling is called anywhere, append it
+    if (!code.includes('.polling(') && !code.includes('.infinity_polling(') && (code.includes('TeleBot(') || code.includes('telebot.TeleBot('))) {
+      code += `\n\n# [TeleHost Supervisor: Auto-started telebot infinity polling]\nif __name__ == '__main__':\n    import sys\n    print("TeleHost: Starting TeleBot infinity polling...")\n    try:\n        bot.infinity_polling(timeout=25, long_polling_timeout=25)\n    except Exception as _e:\n        print(f"Polling loop exception: {_e}")\n`;
+    }
+  }
+
+  // If aiogram is imported and no polling runner exists, append standard asyncio runner
+  if ((code.includes('import aiogram') || code.includes('from aiogram import')) && !code.includes('start_polling') && !code.includes('dp.run_polling')) {
+    code += `\n\n# [TeleHost Supervisor: Auto-started aiogram polling runner]\nif __name__ == '__main__':\n    import asyncio\n    try:\n        if 'dp' in locals() and 'bot' in locals():\n            asyncio.run(dp.start_polling(bot))\n    except Exception as _e:\n        print(f"Aiogram runner exception: {_e}")\n`;
   }
 
   // Ensure import os is present at the very top before any os.getenv calls
   const hasOsImport = code.includes('import os') || code.includes('from os import');
   let header = hasOsImport ? '' : 'import os\n';
+
+  // Ensure universal async http_request helper is available if called in the code
+  if (code.includes('http_request(') && !code.includes('def http_request(')) {
+    header += `
+import urllib.request
+import urllib.error
+from typing import Optional, Dict, Any, List, Tuple, Union
+
+async def http_request(method: str, url: str, headers: Optional[Dict[str, str]] = None, data: Optional[bytes] = None, timeout: int = 20):
+    """Universal async HTTP helper using urllib and asyncio.to_thread."""
+    def _sync_req():
+        req = urllib.request.Request(url, data=data, headers=headers or {}, method=method.upper())
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+        except Exception as e:
+            return 500, str(e).encode('utf-8')
+    try:
+        return await asyncio.to_thread(_sync_req)
+    except Exception as e:
+        return 500, str(e).encode('utf-8')
+\n`;
+  }
 
   // Pre-define standard FamPay and Gateway fallback variables if referenced
   if (code.includes('FAMPAY_API_KEY') && !code.includes('FAMPAY_API_KEY =') && !code.includes('FAMPAY_API_KEY=')) {
@@ -560,7 +729,7 @@ export async function handleAutoHealPythonBot(
   botInfo: HostedPythonBot,
   stderrLog: string
 ): Promise<boolean> {
-  const maxAttempts = 5;
+  const maxAttempts = 6;
   const currentAttempts = (botInfo as any)._autoHealAttempts || 0;
   if (currentAttempts >= maxAttempts) return false;
 
@@ -571,7 +740,7 @@ export async function handleAutoHealPythonBot(
   if (!fs.existsSync(scriptPath)) return false;
 
   // 1. MODULE NOT FOUND ERROR: ModuleNotFoundError: No module named 'xyz'
-  const moduleMatch = stderrLog.match(/ModuleNotFoundError: No module named ['"]([^'"]+)['"]/);
+  const moduleMatch = stderrLog.match(/(?:ModuleNotFoundError|ImportError):\s*No module named ['"]([^'"]+)['"]/);
   if (moduleMatch && moduleMatch[1]) {
     const rawModule = moduleMatch[1].trim();
     const pkgName = PACKAGE_ALIAS_MAP[rawModule] || rawModule;
@@ -598,11 +767,46 @@ export async function handleAutoHealPythonBot(
   if (nameMatch && nameMatch[1]) {
     const varName = nameMatch[1].trim();
     const commonModules = ['os', 'sys', 'json', 'random', 'asyncio', 'time', 'logging', 're', 'math', 'sqlite3', 'aiohttp', 'requests', 'urllib'];
+    const typingNames = ['Optional', 'Dict', 'List', 'Tuple', 'Any', 'Union', 'Callable', 'Set'];
+    const aiogramTypes = ['BufferedInputFile', 'FSInputFile', 'InputFile', 'InlineKeyboardMarkup', 'InlineKeyboardButton', 'CallbackQuery', 'Message', 'ReplyKeyboardMarkup', 'KeyboardButton', 'ReplyKeyboardRemove'];
     
-    const isModule = commonModules.includes(varName);
-    const injection = isModule 
-      ? `import ${varName}\n`
-      : `\n# [TeleHost Auto-Healer Fix: Defined missing '${varName}']\n${varName} = os.getenv("${varName}", "")\n`;
+    let injection = '';
+    let isModule = false;
+
+    if (varName === 'http_request') {
+      injection = `
+import urllib.request
+import urllib.error
+from typing import Optional, Dict, Any, List, Tuple, Union
+
+async def http_request(method: str, url: str, headers: Optional[Dict[str, str]] = None, data: Optional[bytes] = None, timeout: int = 20):
+    """Universal async HTTP helper using urllib and asyncio.to_thread."""
+    def _sync_req():
+        req = urllib.request.Request(url, data=data, headers=headers or {}, method=method.upper())
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+        except Exception as e:
+            return 500, str(e).encode('utf-8')
+    try:
+        return await asyncio.to_thread(_sync_req)
+    except Exception as e:
+        return 500, str(e).encode('utf-8')
+\n`;
+    } else if (typingNames.includes(varName)) {
+      injection = `from typing import ${varName}\n`;
+    } else if (aiogramTypes.includes(varName)) {
+      injection = `from aiogram.types import ${varName}\n`;
+    } else if (varName === 'F') {
+      injection = `from aiogram import F\n`;
+    } else if (commonModules.includes(varName)) {
+      isModule = true;
+      injection = `import ${varName}\n`;
+    } else {
+      injection = `\n# [TeleHost Auto-Healer Fix: Defined missing '${varName}']\n${varName} = os.getenv("${varName}", "")\n`;
+    }
 
     botInfo.logs.push(`[AUTO-HEALER] 🛠️ NameError "${varName}" detected! Auto-injecting ${isModule ? `import ${varName}` : `definition for ${varName}`}...`);
     addLog(botInfo.botId || 'python_engine', 'INFO', `Auto-healing bot "${botInfo.name}": auto-fixing ${varName}`);
@@ -639,9 +843,28 @@ export async function handleAutoHealPythonBot(
     }
   }
 
-  // 3. SYNTAX ERROR / F-STRING NESTED QUOTES ERROR
-  if (stderrLog.includes('SyntaxError') || stderrLog.includes('f-string')) {
-    botInfo.logs.push(`[AUTO-HEALER] 🛠️ Syntax/f-string error detected! Auto-sanitizing code...`);
+  // 3. ASYNCIO EVENT LOOP CONFLICT ERROR
+  if (stderrLog.includes('RuntimeError: This event loop is already running') || stderrLog.includes('There is no current event loop')) {
+    botInfo.logs.push(`[AUTO-HEALER] 🛠️ Asyncio event loop conflict detected! Auto-injecting nest_asyncio...`);
+    try {
+      // Ensure nest_asyncio is installed
+      spawnSync('python3', ['-m', 'pip', 'install', '--break-system-packages', '--quiet', 'nest_asyncio']);
+      let content = fs.readFileSync(scriptPath, 'utf-8');
+      if (!content.includes('import nest_asyncio')) {
+        content = 'import nest_asyncio\nnest_asyncio.apply()\n' + content;
+        fs.writeFileSync(scriptPath, content, 'utf-8');
+        botInfo.logs.push(`[AUTO-HEALER] ✅ Successfully patched asyncio event loop with nest_asyncio. Relaunching...`);
+        spawnPythonBotProcess(botInfo);
+        return true;
+      }
+    } catch (e: any) {
+      botInfo.logs.push(`[AUTO-HEALER] ⚠️ Asyncio patch error: ${e.message}`);
+    }
+  }
+
+  // 4. SYNTAX ERROR / F-STRING NESTED QUOTES ERROR
+  if (stderrLog.includes('SyntaxError') || stderrLog.includes('f-string') || stderrLog.includes('IndentationError')) {
+    botInfo.logs.push(`[AUTO-HEALER] 🛠️ Syntax/Indentation error detected! Auto-sanitizing code...`);
     try {
       const content = fs.readFileSync(scriptPath, 'utf-8');
       const fixed = fixPythonFStringNestedQuotes(sanitizeAndFixPythonCode(content));
@@ -654,6 +877,22 @@ export async function handleAutoHealPythonBot(
     } catch (e: any) {
       botInfo.logs.push(`[AUTO-HEALER] ⚠️ Syntax auto-repair error: ${e.message}`);
     }
+  }
+
+  // 5. ADVANCED AI CODE REPAIR (Heals any remaining unhandled Python exceptions)
+  botInfo.logs.push(`[AUTO-HEALER] 🤖 Analyzing traceback and initiating AI autonomous code repair...`);
+  try {
+    const currentCode = fs.readFileSync(scriptPath, 'utf-8');
+    const aiFixResult = await healPythonCodeWithAI(currentCode, stderrLog);
+    if (aiFixResult.success && aiFixResult.healedCode && aiFixResult.healedCode !== currentCode) {
+      fs.writeFileSync(scriptPath, aiFixResult.healedCode, 'utf-8');
+      botInfo.logs.push(`[AUTO-HEALER] 🌟 [AI AUTONOMOUS REPAIR] ${aiFixResult.explanation || 'Code successfully repaired and compiled'}. Relaunching worker...`);
+      addLog(botInfo.botId || 'python_engine', 'SUCCESS', `[AUTO-HEALED] AI successfully fixed "${botInfo.name}" (${botInfo.id})!`);
+      spawnPythonBotProcess(botInfo);
+      return true;
+    }
+  } catch (aiErr: any) {
+    botInfo.logs.push(`[AUTO-HEALER] ⚠️ AI healing pass notice: ${aiErr.message}`);
   }
 
   return false;
@@ -1099,6 +1338,26 @@ export function deletePythonBot(id: string): boolean {
 
   addLog('python_engine', 'WARN', `Permanently deleted hosted bot "${removed.name}" (${id})`);
   return true;
+}
+
+/**
+ * Get the file path of a hosted python bot for downloading
+ */
+export function getPythonBotScriptPath(id: string): { filePath: string; fileName: string } | null {
+  const bot = hostedPythonBots.find(b => b.id === id);
+  if (!bot) return null;
+  const botDir = path.join(hostedPythonBotsDir, id);
+  const scriptPath = path.join(botDir, bot.entryFile);
+  if (fs.existsSync(scriptPath)) {
+    return { filePath: scriptPath, fileName: bot.entryFile };
+  }
+  if (fs.existsSync(botDir)) {
+    const files = fs.readdirSync(botDir).filter(f => f.endsWith('.py') || f.endsWith('.zip'));
+    if (files.length > 0) {
+      return { filePath: path.join(botDir, files[0]), fileName: files[0] };
+    }
+  }
+  return null;
 }
 
 /**
@@ -2916,6 +3175,7 @@ bot.infinity_polling()`;
     });
 
     activeBots.set(config.id, { instance: bot, info: botInfo });
+    saveManifests();
     addLog(config.id, 'SUCCESS', `Real Telegram Bot @${me.username} is NOW LIVE with Python Bot Hosting Runtime!`);
 
     return { success: true, username: me.username };
@@ -2943,6 +3203,7 @@ export async function stopRealBot(botId: string) {
       }
       item.info.status = 'STOPPED';
       activeBots.delete(botId);
+      saveManifests();
       addLog(botId, 'WARN', `Stopped Telegram Bot polling for @${item.info.botUsername}`);
     } catch (e: any) {
       console.error('Error stopping bot:', e);
@@ -2967,17 +3228,28 @@ process.on('SIGTERM', async () => {
   }
 });
 
-// 24/7 PROCESS SUPERVISOR & KEEPALIVE WATCHDOG
-// Periodically checks active hosted python bots and ensures they remain alive 24/7
-setInterval(() => {
+// 24/7 PROCESS SUPERVISOR & TELEGRAM POLLING KEEPALIVE WATCHDOG
+// Periodically checks active hosted python bots and Master Telegram Bot polling health 24/7
+setInterval(async () => {
+  // 1. Python Worker Processes Check
   hostedPythonBots.forEach(bot => {
-    // Only monitor actively running bots (do NOT revive manually stopped or conflicting bots)
     if (bot.status === 'RUNNING' && bot.autoRestartEnabled !== false) {
       const proc = runningProcesses.get(bot.id);
       const hasPendingTimer = pendingRestartTimeouts.has(bot.id);
-      if (!proc || proc.killed || proc.exitCode !== null) {
+      
+      let isAlive = false;
+      if (proc && proc.pid && !proc.killed && proc.exitCode === null) {
+        try {
+          process.kill(proc.pid, 0);
+          isAlive = true;
+        } catch (e: any) {
+          isAlive = false;
+        }
+      }
+
+      if (!isAlive) {
         if (!hasPendingTimer && (bot.consecutiveCrashCount || 0) < 10) {
-          bot.logs.push(`[24/7 WATCHDOG] ⚡ Detected dead worker for "${bot.name}". Reviving process now...`);
+          bot.logs.push(`[24/7 WATCHDOG] ⚡ Detected unresponsive/closed worker for "${bot.name}". Reviving process now...`);
           addLog(bot.botId || 'python_engine', 'INFO', `[24/7 WATCHDOG] Reviving "${bot.name}" (${bot.id}) to ensure 24/7 continuous uptime.`);
           spawnPythonBotProcess(bot);
         }
@@ -2986,5 +3258,32 @@ setInterval(() => {
       }
     }
   });
+
+  // 2. Master Telegram Bot Polling Socket Keep-Alive & Auto-Refresh
+  for (const [botId, item] of activeBots.entries()) {
+    if (item.info && item.info.status === 'RUNNING' && item.instance) {
+      try {
+        const botInstance = item.instance;
+        if (botInstance._isStopped) continue;
+
+        // Verify polling state
+        const isPollingActive = typeof botInstance.isPolling === 'function' ? botInstance.isPolling() : true;
+        
+        if (!isPollingActive) {
+          console.log(`[24/7 Polling Watchdog] Polling was inactive for @${item.info.botUsername}. Restarting polling...`);
+          addLog(botId, 'INFO', `[24/7 WATCHDOG] Refreshing polling socket for @${item.info.botUsername}...`);
+          try {
+            if (typeof botInstance.startPolling === 'function') {
+              await botInstance.startPolling();
+            }
+          } catch (e: any) {
+            console.warn('[Polling restart error]', e.message);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[24/7 Polling Watchdog Check @${item.info.botUsername}]`, err.message);
+      }
+    }
+  }
 }, 10000);
 

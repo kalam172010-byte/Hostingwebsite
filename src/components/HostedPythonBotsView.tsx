@@ -21,7 +21,8 @@ import {
   CheckCircle2,
   HelpCircle,
   Send,
-  ArrowLeft
+  ArrowLeft,
+  Download
 } from 'lucide-react';
 
 interface HostedPythonBotsViewProps {
@@ -64,6 +65,31 @@ export const HostedPythonBotsView: React.FC<HostedPythonBotsViewProps> = ({
   const [tokenTesting, setTokenTesting] = useState(false);
   const [tokenTestResult, setTokenTestResult] = useState<{ success: boolean; message: string; username?: string } | null>(null);
   const [showTroubleshooter, setShowTroubleshooter] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleDownloadBotFile = async (bot: HostedPythonBot) => {
+    try {
+      setDownloadingId(bot.id);
+      const res = await fetch(`/api/python-bots/${bot.id}/download`);
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = bot.entryFile || `${bot.name.replace(/\s+/g, '_')}.py`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      console.error('Download error:', err);
+      window.location.href = `/api/python-bots/${bot.id}/download`;
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   // Close modals on Escape key press
   React.useEffect(() => {
@@ -510,9 +536,20 @@ while True:
                             {bot.name}
                           </h3>
                         </div>
-                        <p className="text-xs text-slate-400 font-mono">
-                          Entry: <span className="text-blue-400 font-semibold">{bot.entryFile}</span>
-                        </p>
+                        <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                          <p className="text-xs text-slate-400 font-mono">
+                            Entry: <span className="text-blue-400 font-semibold">{bot.entryFile}</span>
+                          </p>
+                          <button
+                            onClick={() => handleDownloadBotFile(bot)}
+                            disabled={downloadingId === bot.id}
+                            className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 hover:text-white border border-blue-500/30 transition font-medium shadow-sm cursor-pointer disabled:opacity-50"
+                            title={`Download ${bot.entryFile}`}
+                          >
+                            <Download className="w-3 h-3 text-blue-400" />
+                            <span>{downloadingId === bot.id ? 'Downloading...' : 'Download .py'}</span>
+                          </button>
+                        </div>
                       </div>
 
                       <span
@@ -540,17 +577,27 @@ while True:
                         )}
                       </div>
 
-                      <button
-                        onClick={() => handleCopy(bot.id, bot.id)}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition shrink-0"
-                        title="Copy Bot ID"
-                      >
-                        {copiedId === bot.id ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => handleDownloadBotFile(bot)}
+                          disabled={downloadingId === bot.id}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 hover:text-cyan-300 transition flex items-center gap-1 text-xs cursor-pointer"
+                          title="Download Script File"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleCopy(bot.id, bot.id)}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                          title="Copy Bot ID"
+                        >
+                          {copiedId === bot.id ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     {/* Meta info */}
@@ -586,6 +633,15 @@ while True:
                     </button>
 
                     <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleDownloadBotFile(bot)}
+                        disabled={downloadingId === bot.id}
+                        className="p-2 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 transition cursor-pointer"
+                        title="Download Bot Script (.py)"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                      </button>
+
                       {isRunning ? (
                         <>
                           <button
@@ -765,6 +821,15 @@ while True:
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDownloadBotFile(selectedBotForLogs)}
+                  disabled={downloadingId === selectedBotForLogs.id}
+                  className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition flex items-center gap-1.5 shadow-md shadow-blue-600/20 cursor-pointer disabled:opacity-50"
+                  title="Download file to computer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{downloadingId === selectedBotForLogs.id ? 'Downloading...' : 'Download File'}</span>
+                </button>
                 <button
                   onClick={() => onStartBot(selectedBotForLogs.id)}
                   className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition flex items-center gap-1.5 border border-slate-700"
