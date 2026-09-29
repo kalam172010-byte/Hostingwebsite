@@ -642,8 +642,9 @@ async function startServer() {
         });
         return;
       }
-      // If port 3000 is already active in dev, do not crash fatal with exit code 1
-      console.log(`[TeleHost] Existing server is already running and active on port ${PORT}.`);
+      // If port 3000 is already active, keep process running or stay attached
+      console.log(`[TeleHost] Existing server is already running and active on port ${PORT}. Keeping standby process active.`);
+      setInterval(() => {}, 60000);
     } else {
       console.error('[TeleHost] Fatal server error:', err);
       process.exit(1);
