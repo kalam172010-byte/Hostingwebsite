@@ -1,0 +1,38 @@
+[
+  {
+    "id": "bot_primary",
+    "name": "Telegram Project Host Bot",
+    "botUsername": "MMTESTINGBOT_BOT",
+    "token": "8723574391:AAFf-PFDhLZUPRGH7uXz7SjC0SyeSfOQeog",
+    "adminChatId": "",
+    "downloadPath": "/app/applet/downloads/bot_primary",
+    "status": "RUNNING",
+    "rules": {
+      "maxFileSizeMB": 100,
+      "allowedExtensions": [
+        ".py",
+        ".zip",
+        ".txt",
+        ".json",
+        ".pdf"
+      ],
+      "requireCaptionKeyword": false,
+      "allowedKeywords": [
+        "#host",
+        "#bot",
+        "run"
+      ],
+      "autoRejectExecutables": false,
+      "customRejectionMessage": "Only Python files (.py) or .zip archives are supported."
+    },
+    "stats": {
+      "received": 0,
+      "approved": 0,
+      "pending": 0,
+      "rejected": 0,
+      "downloadedMB": 0,
+      "projectsHosted": 0,
+      "pythonBotsHosted": 0
+    }
+  }
+]

@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
@@ -293,6 +294,297 @@ app.get('/api/python-bots/:id/download', (req, res) => {
     return res.status(404).json({ error: 'Bot file not found on server.' });
   }
   res.download(botInfo.filePath, botInfo.fileName);
+});
+
+// ==============================================================================
+// AKASH FF PANEL - DATABASE & MANAGEMENT REST API
+// ==============================================================================
+
+function queryDb(sql: string, params: any[] = []): any {
+  try {
+    const pyScript = `
+import sqlite3, json, sys
+conn = sqlite3.connect('Cuibcc.db')
+conn.row_factory = sqlite3.Row
+c = conn.cursor()
+sql = ${JSON.stringify(sql)}
+params = ${JSON.stringify(params)}
+c.execute(sql, params)
+if sql.strip().upper().startswith('SELECT') or sql.strip().upper().startswith('PRAGMA'):
+    rows = [dict(r) for r in c.fetchall()]
+    print(json.dumps(rows))
+else:
+    conn.commit()
+    print(json.dumps({'affected': c.rowcount, 'lastrowid': c.lastrowid}))
+`;
+    const out = execSync('python3', { input: pyScript, encoding: 'utf-8', timeout: 6000 });
+    return JSON.parse(out.trim());
+  } catch (err: any) {
+    console.error('[queryDb error]', err.message);
+    return [];
+  }
+}
+
+// 1. Overview Stats
+app.get('/api/ff-panel/overview', (_req, res) => {
+  try {
+    const products = queryDb('SELECT COUNT(*) as count FROM products');
+    const keys = queryDb('SELECT COUNT(*) as count FROM product_keys WHERE is_used=0');
+    const users = queryDb('SELECT COUNT(*) as count, SUM(balance) as total_bal, SUM(spent) as total_spent FROM users');
+    const orders = queryDb('SELECT COUNT(*) as count FROM orders');
+    
+    res.json({
+      totalProducts: products[0]?.count || 0,
+      availableKeys: keys[0]?.count || 0,
+      totalUsers: users[0]?.count || 0,
+      totalBalance: users[0]?.total_bal || 0,
+      totalSpent: users[0]?.total_spent || 0,
+      totalOrders: orders[0]?.count || 0,
+      botUsername: 'AKASHFFPANEL11BOT',
+      adminId: '8808556338'
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Products List
+app.get('/api/ff-panel/products', (_req, res) => {
+  try {
+    const products = queryDb('SELECT * FROM products ORDER BY id ASC');
+    const productsWithKeys = products.map((p: any) => {
+      const keyCount = queryDb('SELECT COUNT(*) as count FROM product_keys WHERE product_id=? AND is_used=0', [p.id]);
+      return {
+        ...p,
+        availableKeysCount: keyCount[0]?.count || 0
+      };
+    });
+    res.json({ products: productsWithKeys });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Create Product
+app.post('/api/ff-panel/products', (req, res) => {
+  try {
+    const { category, name, price_inr, reseller_price, validity, device_limit, apk_link } = req.body;
+    const result = queryDb(
+      'INSERT INTO products (category, name, price_inr, reseller_price, stock, apk_link, validity, device_limit, is_active) VALUES (?, ?, ?, ?, 10, ?, ?, ?, 1)',
+      [category || 'ANDROID NON ROOT PANEL', name, price_inr || 100, reseller_price || 80, apk_link || 'https://t.me/Akash_12121', validity || '1 Day', device_limit || '1 Device']
+    );
+    res.json({ success: true, id: result.lastrowid });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Delete Product
+app.delete('/api/ff-panel/products/:id', (req, res) => {
+  try {
+    queryDb('DELETE FROM products WHERE id=?', [req.params.id]);
+    queryDb('DELETE FROM product_keys WHERE product_id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Product Keys List
+app.get('/api/ff-panel/keys', (req, res) => {
+  try {
+    const productId = req.query.productId;
+    let sql = `
+      SELECT pk.id, pk.product_id, pk.key_text, pk.is_used, p.name as product_name, p.category 
+      FROM product_keys pk 
+      LEFT JOIN products p ON pk.product_id = p.id
+    `;
+    const params: any[] = [];
+    if (productId) {
+      sql += ' WHERE pk.product_id = ?';
+      params.push(productId);
+    }
+    sql += ' ORDER BY pk.id DESC';
+    const keys = queryDb(sql, params);
+    res.json({ keys });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Add or Bulk Generate Keys
+app.post('/api/ff-panel/keys', (req, res) => {
+  try {
+    const { productId, keys, prefix, count } = req.body;
+    let addedCount = 0;
+
+    if (Array.isArray(keys) && keys.length > 0) {
+      for (const k of keys) {
+        if (typeof k === 'string' && k.trim()) {
+          queryDb('INSERT INTO product_keys (product_id, key_text, is_used) VALUES (?, ?, 0)', [productId, k.trim()]);
+          addedCount++;
+        }
+      }
+    } else if (count && count > 0) {
+      const keyPrefix = prefix || 'AKASH-VIP';
+      for (let i = 0; i < count; i++) {
+        const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
+        const randNum = Math.floor(1000 + Math.random() * 9000);
+        const generatedKey = `${keyPrefix}-${rand}-${randNum}`;
+        queryDb('INSERT INTO product_keys (product_id, key_text, is_used) VALUES (?, ?, 0)', [productId, generatedKey]);
+        addedCount++;
+      }
+    }
+
+    res.json({ success: true, addedCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. Delete Key
+app.delete('/api/ff-panel/keys/:id', (req, res) => {
+  try {
+    queryDb('DELETE FROM product_keys WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 8. Users Info List
+app.get('/api/ff-panel/users', (_req, res) => {
+  try {
+    const users = queryDb('SELECT * FROM users ORDER BY user_id DESC');
+    res.json({ users });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. Update User Balance
+app.post('/api/ff-panel/users/:id/balance', (req, res) => {
+  try {
+    const { amount, mode } = req.body; // mode: 'add' | 'deduct' | 'set'
+    const num = parseFloat(amount);
+    if (isNaN(num)) return res.status(400).json({ error: 'Invalid amount' });
+
+    if (mode === 'set') {
+      queryDb('UPDATE users SET balance=? WHERE user_id=?', [num, req.params.id]);
+    } else if (mode === 'deduct') {
+      queryDb('UPDATE users SET balance=MAX(0, balance - ?) WHERE user_id=?', [num, req.params.id]);
+    } else {
+      queryDb('UPDATE users SET balance=balance + ? WHERE user_id=?', [num, req.params.id]);
+    }
+
+    const updated = queryDb('SELECT balance FROM users WHERE user_id=?', [req.params.id]);
+    res.json({ success: true, balance: updated[0]?.balance || 0 });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10. Toggle VIP Status
+app.post('/api/ff-panel/users/:id/toggle-vip', (req, res) => {
+  try {
+    const user = queryDb('SELECT is_vip FROM users WHERE user_id=?', [req.params.id]);
+    if (!user || user.length === 0) return res.status(404).json({ error: 'User not found' });
+    const newVip = user[0].is_vip ? 0 : 1;
+    queryDb('UPDATE users SET is_vip=? WHERE user_id=?', [newVip, req.params.id]);
+    res.json({ success: true, is_vip: newVip });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 11. Toggle Reseller Status
+app.post('/api/ff-panel/users/:id/toggle-reseller', (req, res) => {
+  try {
+    const user = queryDb('SELECT is_reseller FROM users WHERE user_id=?', [req.params.id]);
+    if (!user || user.length === 0) return res.status(404).json({ error: 'User not found' });
+    const newRes = user[0].is_reseller ? 0 : 1;
+    const accType = newRes ? 'Reseller' : 'Regular';
+    queryDb('UPDATE users SET is_reseller=?, account_type=? WHERE user_id=?', [newRes, accType, req.params.id]);
+    res.json({ success: true, is_reseller: newRes });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12. Toggle User Ban
+app.post('/api/ff-panel/users/:id/toggle-ban', (req, res) => {
+  try {
+    const user = queryDb('SELECT is_banned FROM users WHERE user_id=?', [req.params.id]);
+    if (!user || user.length === 0) return res.status(404).json({ error: 'User not found' });
+    const newBanned = user[0].is_banned ? 0 : 1;
+    queryDb('UPDATE users SET is_banned=? WHERE user_id=?', [newBanned, req.params.id]);
+    res.json({ success: true, is_banned: newBanned });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 13. Download / Export Users Info File
+app.get('/api/ff-panel/users/export', (_req, res) => {
+  try {
+    const users = queryDb('SELECT * FROM users ORDER BY user_id ASC');
+    let text = '========================================================================================\n';
+    text += '                     AKASH FF PANEL - OFFICIAL USERS DATABASE DUMP                     \n';
+    text += `                     Generated on: ${new Date().toLocaleString()}                      \n`;
+    text += '========================================================================================\n\n';
+
+    users.forEach((u: any, idx: number) => {
+      text += `[#${idx + 1}] USER ID: ${u.user_id}\n`;
+      text += `  • Name: ${u.first_name || 'N/A'}\n`;
+      text += `  • Username: @${u.username || 'None'}\n`;
+      text += `  • Phone: ${u.phone || 'Not Provided'}\n`;
+      text += `  • Balance: ₹${(u.balance || 0).toFixed(2)}\n`;
+      text += `  • Account Level: ${u.is_vip ? 'VIP Member' : (u.is_reseller ? 'Reseller' : 'Regular User')}\n`;
+      text += `  • Orders Completed: ${u.orders_count || 0} | Total Spent: ₹${(u.spent || 0).toFixed(2)}\n`;
+      text += `  • Status: ${u.is_banned ? 'BANNED 🚫' : 'ACTIVE 🟢'}\n`;
+      text += `  • Joined Date: ${u.joined_date || 'N/A'}\n`;
+      text += '----------------------------------------------------------------------------------------\n';
+    });
+
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Content-Disposition', `attachment; filename="users_info_${Date.now()}.txt"`);
+    res.send(text);
+  } catch (err: any) {
+    res.status(500).send(`Export failed: ${err.message}`);
+  }
+});
+
+// 14. Telegram Broadcast Message
+app.post('/api/ff-panel/broadcast', async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Message text cannot be empty' });
+    }
+    const token = '8632912098:AAENMDr-tkYBDsgl5MkA8SAt_3qOgnpL8j8';
+    const users = queryDb('SELECT user_id FROM users WHERE is_banned=0');
+    let sentCount = 0;
+
+    for (const u of users) {
+      try {
+        const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: u.user_id,
+            text: `📢 <b>AKASH FF PANEL ANNOUNCEMENT</b>\n━━━━━━━━━━━━━━━━━━\n\n${message}\n\n━━━━━━━━━━━━━━━━━━\n👑 <b>Admin:</b> @Akash_12121`,
+            parse_mode: 'HTML'
+          })
+        });
+        const data = await resp.json() as any;
+        if (data.ok) sentCount++;
+      } catch (_) {}
+    }
+
+    res.json({ success: true, sentCount, totalUsers: users.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // System Hardware & Cloud Server Metrics

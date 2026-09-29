@@ -112,12 +112,12 @@ export default function App() {
       const res = await fetch('/api/python-bots');
       if (res.ok) {
         const data = await res.json();
-        if (data.bots) {
+        if (data.bots && Array.isArray(data.bots)) {
           setHostedPythonBots(data.bots);
         }
       }
-    } catch (e) {
-      console.error('Error fetching hosted python bots:', e);
+    } catch (_e) {
+      // Gracefully ignore transient network drops or dev server reloads
     }
   };
 
@@ -127,12 +127,12 @@ export default function App() {
       const res = await fetch('/api/hosted-projects');
       if (res.ok) {
         const data = await res.json();
-        if (data.projects) {
+        if (data.projects && Array.isArray(data.projects)) {
           setHostedProjects(data.projects);
         }
       }
-    } catch (e) {
-      console.error('Error fetching hosted projects:', e);
+    } catch (_e) {
+      // Gracefully ignore transient network drops or dev server reloads
     }
   };
 
@@ -946,6 +946,7 @@ export default function App() {
               </button>
               <ChevronLeft className="w-3.5 h-3.5 rotate-180 text-slate-600" />
               <span className="text-cyan-300 font-bold flex items-center gap-1.5 bg-cyan-950/60 px-2.5 py-1 rounded-lg border border-cyan-500/30">
+                {activeNav === 'ff_panel' && <><span>🎮</span> Akash FF Panel Console</>}
                 {activeNav === 'python_bots' && <><span>🐍</span> Python Telegram Bots</>}
                 {activeNav === 'hosted_sites' && <><span>🌐</span> Web Site Hosting</>}
                 {activeNav === 'dashboard' && <><span>🤖</span> Master Bots Dashboard</>}
@@ -961,11 +962,11 @@ export default function App() {
           {activeNav !== 'python_bots' && (
             <button
               onClick={() => setActiveNav('python_bots')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition-all border border-white/10 shadow-sm"
-              title="Return to Home (Python Bots)"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 hover:text-white text-xs font-semibold transition-all border border-cyan-500/20 shadow-sm"
+              title="Return to Python Bots Studio"
             >
-              <Home className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="hidden sm:inline">Home</span>
+              <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden sm:inline">Python Bots</span>
             </button>
           )}
         </div>

@@ -1,0 +1,33 @@
+[
+  {
+    "id": "bot_primary",
+    "name": "AKASHFFPANEL1BOT",
+    "botUsername": "AKASHFFPANEL11BOT",
+    "token": "8632912098:AAENMDr-tkYBDsgl5MkA8SAt_3qOgnpL8j8",
+    "adminChatId": "8808556338",
+    "downloadPath": "/app/applet/downloads/bot_primary",
+    "status": "RUNNING",
+    "rules": {
+      "maxFileSizeMB": 100,
+      "allowedExtensions": [
+        ".py",
+        ".zip",
+        ".txt",
+        ".json"
+      ],
+      "requireCaptionKeyword": false,
+      "allowedKeywords": [],
+      "autoRejectExecutables": false,
+      "customRejectionMessage": "Only valid Free Fire panel files or configurations are supported."
+    },
+    "stats": {
+      "received": 0,
+      "approved": 0,
+      "pending": 0,
+      "rejected": 0,
+      "downloadedMB": 0,
+      "projectsHosted": 0,
+      "pythonBotsHosted": 0
+    }
+  }
+]
