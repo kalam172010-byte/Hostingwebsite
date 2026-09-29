@@ -122,6 +122,7 @@ if (!fs.existsSync(downloadsRootDir)) {
 
 // Global active python process map
 const runningProcesses = new Map<string, any>();
+const pendingRestartTimeouts = new Map<string, NodeJS.Timeout>();
 
 // Hosted Python Bots registry
 const hostedPythonBots: HostedPythonBot[] = [];
@@ -192,8 +193,22 @@ export function resetDailyUploadLimit(senderId?: number) {
   saveDailyUploadsManifest();
 }
 
+let globalTelegramRateLimitUntil = 0;
+
 export async function notifyUserOfBotError(botInfo: HostedPythonBot, errorDetails: string) {
   if (!botInfo.senderId) return;
+
+  const now = Date.now();
+  // Don't send error notifications if globally rate limited by Telegram
+  if (now < globalTelegramRateLimitUntil) {
+    return;
+  }
+
+  // Throttle error notifications per bot: at most once every 120 seconds
+  if (botInfo.lastErrorNotifiedAt && (now - botInfo.lastErrorNotifiedAt) < 120000) {
+    return;
+  }
+  botInfo.lastErrorNotifiedAt = now;
 
   const activeBot = Array.from(activeBots.values())[0];
   if (!activeBot || !activeBot.instance) return;
@@ -230,7 +245,15 @@ export async function notifyUserOfBotError(botInfo: HostedPythonBot, errorDetail
     );
     addLog(botInfo.botId || 'python_engine', 'WARN', `Sent error notification to user ID ${botInfo.senderId} for bot "${botInfo.name}".`);
   } catch (err: any) {
-    console.error('[Failed to send error notification]', err.message);
+    const errStr = err.message || String(err);
+    if (errStr.includes('429') || errStr.includes('Too Many Requests')) {
+      const retryMatch = errStr.match(/retry after (\d+)/i);
+      const retrySec = retryMatch ? parseInt(retryMatch[1], 10) : 60;
+      globalTelegramRateLimitUntil = Date.now() + (retrySec * 1000);
+      addLog(botInfo.botId || 'python_engine', 'WARN', `[Telegram Rate Limit 429] Pausing notifications for ${retrySec}s.`);
+    } else {
+      console.warn('[Notification notice]', err.message);
+    }
   }
 }
 
@@ -452,6 +475,54 @@ const PACKAGE_ALIAS_MAP: Record<string, string> = {
   dateutil: 'python-dateutil'
 };
 
+export function fixPythonFStringNestedQuotes(code: string): string {
+  const lines = code.split('\n');
+  const fixedLines = lines.map(line => {
+    if (!line.includes('f"') && !line.includes("f'")) return line;
+
+    let inFString = false;
+    let fQuote = '';
+    let inBraces = 0;
+    let out = '';
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (!inFString) {
+        if ((ch === 'f' || ch === 'F') && (line[i + 1] === '"' || line[i + 1] === "'")) {
+          inFString = true;
+          fQuote = line[i + 1];
+          out += ch + fQuote;
+          i++;
+          continue;
+        }
+        out += ch;
+      } else {
+        if (ch === '\\') {
+          out += ch + (line[i + 1] || '');
+          i++;
+          continue;
+        }
+        if (ch === '{') {
+          inBraces++;
+          out += ch;
+        } else if (ch === '}') {
+          inBraces = Math.max(0, inBraces - 1);
+          out += ch;
+        } else if (inBraces > 0 && ch === fQuote) {
+          out += (fQuote === '"' ? "'" : '"');
+        } else if (inBraces === 0 && ch === fQuote) {
+          inFString = false;
+          out += ch;
+        } else {
+          out += ch;
+        }
+      }
+    }
+    return out;
+  });
+
+  return fixedLines.join('\n');
+}
+
 export function sanitizeAndFixPythonCode(rawCode: string): string {
   let code = rawCode.replace(/\r\n/g, '\n').replace(/^\uFEFF/, '');
   
@@ -461,10 +532,8 @@ export function sanitizeAndFixPythonCode(rawCode: string): string {
   // Fix unquoted admin contacts like ADMIN_CONTACT = @Username
   code = code.replace(/^(\s*ADMIN_CONTACT\s*=\s*)(@[a-zA-Z0-9_]+)/gm, '$1"$2"');
 
-  // Fix common Python 3.11 nested double quote f-string bug: f"{func("arg")}" -> f"{func('arg')}"
-  code = code.replace(/f"([^"\n]*?)\{([^{}\n]*?)"([^"\n]*?)"([^{}\n]*?)\}([^"\n]*?)"/g, (match, p1, p2, p3, p4, p5) => {
-    return `f"${p1}{${p2}'${p3}'${p4}}${p5}"`;
-  });
+  // Fix all nested f-string quotes
+  code = fixPythonFStringNestedQuotes(code);
 
   // Upgrade standard telebot bot.polling() to infinity_polling so network blips never crash the bot
   if (code.includes('import telebot') || code.includes('from telebot import')) {
@@ -570,6 +639,23 @@ export async function handleAutoHealPythonBot(
     }
   }
 
+  // 3. SYNTAX ERROR / F-STRING NESTED QUOTES ERROR
+  if (stderrLog.includes('SyntaxError') || stderrLog.includes('f-string')) {
+    botInfo.logs.push(`[AUTO-HEALER] 🛠️ Syntax/f-string error detected! Auto-sanitizing code...`);
+    try {
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      const fixed = fixPythonFStringNestedQuotes(sanitizeAndFixPythonCode(content));
+      if (fixed && fixed !== content) {
+        fs.writeFileSync(scriptPath, fixed, 'utf-8');
+        botInfo.logs.push(`[AUTO-HEALER] ✅ Successfully auto-fixed f-string syntax. Relaunching bot worker...`);
+        spawnPythonBotProcess(botInfo);
+        return true;
+      }
+    } catch (e: any) {
+      botInfo.logs.push(`[AUTO-HEALER] ⚠️ Syntax auto-repair error: ${e.message}`);
+    }
+  }
+
   return false;
 }
 
@@ -593,6 +679,13 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
       try { fs.mkdirSync(subPath, { recursive: true }); } catch (_) {}
     }
   });
+
+  // Clear any existing pending restart timeout for this bot
+  const existingTimer = pendingRestartTimeouts.get(botInfo.id);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    pendingRestartTimeouts.delete(botInfo.id);
+  }
 
   // Kill existing process if running
   const existing = runningProcesses.get(botInfo.id);
@@ -628,6 +721,13 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
     botInfo.startedAt = new Date().toLocaleTimeString();
     runningProcesses.set(botInfo.id, child);
 
+    // If bot runs successfully for more than 20 seconds, reset crash counter
+    const healthyTimer = setTimeout(() => {
+      if (runningProcesses.get(botInfo.id) === child) {
+        botInfo.consecutiveCrashCount = 0;
+      }
+    }, 20000);
+
     let runStderr = '';
 
     child.stdout.on('data', (data: Buffer) => {
@@ -654,6 +754,7 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
     });
 
     child.on('close', async (code: number | null) => {
+      clearTimeout(healthyTimer);
       botInfo.exitCode = code;
       runningProcesses.delete(botInfo.id);
 
@@ -661,6 +762,8 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
       addLog(botInfo.botId || 'python_engine', code === 0 ? 'INFO' : 'WARN', `Bot "${botInfo.name}" (${botInfo.id}) process exited (code ${code})`);
 
       if (code !== 0 && code !== null) {
+        botInfo.consecutiveCrashCount = (botInfo.consecutiveCrashCount || 0) + 1;
+
         // Attempt autonomous healing
         const healed = await handleAutoHealPythonBot(botInfo, runStderr);
         if (healed) {
@@ -668,42 +771,56 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
           return;
         }
 
-        // Notify uploader on Telegram if error persists
+        // Notify uploader on Telegram if error persists (with throttle)
         await notifyUserOfBotError(botInfo, runStderr);
       }
 
       // 24/7 AUTO-RESTART SUPERVISOR:
-      // If the bot was NOT explicitly stopped by the user, automatically restart it after a brief backoff
+      // If the bot was NOT explicitly stopped by the user, automatically restart it with backoff
       if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED') {
         botInfo.status = 'RUNNING';
         botInfo.restartCount = (botInfo.restartCount || 0) + 1;
-        const delayMs = Math.min(1000 + ((botInfo.restartCount - 1) % 5) * 1000, 5000);
-        botInfo.logs.push(`[24/7 SUPERVISOR] 🔄 Auto-restarting bot worker in ${Math.round(delayMs / 1000)}s (Restart #${botInfo.restartCount}) to maintain 24/7 online status...`);
-        addLog(botInfo.botId || 'python_engine', 'INFO', `[24/7 SUPERVISOR] Auto-restarting "${botInfo.name}" (${botInfo.id}) to maintain 24/7 uptime.`);
         
-        setTimeout(() => {
+        // Calculate backoff: if repeated rapid crashes, increase delay up to 30s
+        const crashCount = botInfo.consecutiveCrashCount || 0;
+        let delayMs = 1500;
+        if (crashCount > 6) {
+          delayMs = Math.min(30000, 5000 + (crashCount - 6) * 5000);
+        } else if (crashCount > 2) {
+          delayMs = 3000;
+        }
+
+        botInfo.logs.push(`[24/7 SUPERVISOR] 🔄 Auto-restarting bot worker in ${Math.round(delayMs / 1000)}s (Restart #${botInfo.restartCount}) to maintain 24/7 online status...`);
+        addLog(botInfo.botId || 'python_engine', 'INFO', `[24/7 SUPERVISOR] Scheduling restart for "${botInfo.name}" (${botInfo.id}) in ${Math.round(delayMs / 1000)}s.`);
+        
+        const restartTimer = setTimeout(() => {
+          pendingRestartTimeouts.delete(botInfo.id);
           if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED' && !runningProcesses.has(botInfo.id)) {
             spawnPythonBotProcess(botInfo);
           }
         }, delayMs);
+        pendingRestartTimeouts.set(botInfo.id, restartTimer);
       } else {
         botInfo.status = 'STOPPED';
       }
     });
 
     child.on('error', (err: any) => {
+      clearTimeout(healthyTimer);
       botInfo.status = 'ERROR';
       botInfo.logs.push(`[PROCESS ERROR] ${err.message}`);
       runningProcesses.delete(botInfo.id);
       addLog(botInfo.botId || 'python_engine', 'ERROR', `Failed running python bot "${botInfo.name}": ${err.message}`);
       notifyUserOfBotError(botInfo, err.message);
 
-      if (botInfo.autoRestartEnabled !== false) {
-        setTimeout(() => {
+      if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED') {
+        const restartTimer = setTimeout(() => {
+          pendingRestartTimeouts.delete(botInfo.id);
           if (botInfo.autoRestartEnabled !== false && !runningProcesses.has(botInfo.id)) {
             spawnPythonBotProcess(botInfo);
           }
-        }, 3000);
+        }, 5000);
+        pendingRestartTimeouts.set(botInfo.id, restartTimer);
       }
     });
 
@@ -755,10 +872,12 @@ export async function deployPythonBotFromFile(
 
   // Stop previously running bots with identical name or from the same sender to prevent Telegram 409 conflict
   hostedPythonBots.forEach(oldBot => {
-    if (oldBot.id !== cleanId && oldBot.status === 'RUNNING') {
-      if (oldBot.senderId === meta.senderId || oldBot.originalFileName === meta.originalFileName) {
+    if (oldBot.id !== cleanId) {
+      if (oldBot.senderId === meta.senderId || oldBot.originalFileName === meta.originalFileName || oldBot.name === meta.name) {
         stopPythonBot(oldBot.id);
-        oldBot.logs.push(`[SYSTEM] Stopped to allow newer version (${cleanId}) to run without 409 token conflict.`);
+        oldBot.status = 'STOPPED';
+        oldBot.autoRestartEnabled = false;
+        oldBot.logs.push(`[SYSTEM] Stopped permanently to allow newer version (${cleanId}) to run without 409 token conflict.`);
       }
     }
   });
@@ -2831,19 +2950,21 @@ process.on('SIGTERM', async () => {
 });
 
 // 24/7 PROCESS SUPERVISOR & KEEPALIVE WATCHDOG
-// Periodically checks all hosted python bots and ensures they remain alive and running 24/7
+// Periodically checks active hosted python bots and ensures they remain alive 24/7
 setInterval(() => {
   hostedPythonBots.forEach(bot => {
-    if (bot.status === 'RUNNING' || bot.autoRestartEnabled !== false) {
-      if (bot.status !== 'STOPPED') {
-        const proc = runningProcesses.get(bot.id);
-        if (!proc || proc.killed || proc.exitCode !== null) {
+    // Only monitor actively running bots (do NOT revive manually stopped or conflicting bots)
+    if (bot.status === 'RUNNING' && bot.autoRestartEnabled !== false) {
+      const proc = runningProcesses.get(bot.id);
+      const hasPendingTimer = pendingRestartTimeouts.has(bot.id);
+      if (!proc || proc.killed || proc.exitCode !== null) {
+        if (!hasPendingTimer && (bot.consecutiveCrashCount || 0) < 10) {
           bot.logs.push(`[24/7 WATCHDOG] ⚡ Detected dead worker for "${bot.name}". Reviving process now...`);
           addLog(bot.botId || 'python_engine', 'INFO', `[24/7 WATCHDOG] Reviving "${bot.name}" (${bot.id}) to ensure 24/7 continuous uptime.`);
           spawnPythonBotProcess(bot);
-        } else {
-          bot.uptimeSeconds = (bot.uptimeSeconds || 0) + 10;
         }
+      } else {
+        bot.uptimeSeconds = (bot.uptimeSeconds || 0) + 10;
       }
     }
   });

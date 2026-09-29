@@ -100,6 +100,8 @@ export interface HostedPythonBot {
   startedAt: string;
   uptimeSeconds: number;
   restartCount?: number;
+  consecutiveCrashCount?: number;
+  lastErrorNotifiedAt?: number;
   autoRestartEnabled?: boolean;
   logs: string[];
   description?: string;
