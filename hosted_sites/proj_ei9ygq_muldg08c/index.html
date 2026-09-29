@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Space Blaster - Retro Canvas Game</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-black text-white flex flex-col items-center justify-center min-h-screen p-4 font-mono">
+  <div class="text-center mb-4">
+    <h1 class="text-3xl font-black text-yellow-400 mb-1">👾 SPACE TAP MINI GAME</h1>
+    <p class="text-xs text-gray-400">Click the moving target to score points!</p>
+  </div>
+  <div class="border-2 border-yellow-500/50 rounded-2xl overflow-hidden shadow-2xl shadow-yellow-500/20">
+    <canvas id="gameCanvas" width="450" height="300" class="bg-slate-950 cursor-crosshair"></canvas>
+  </div>
+  <div class="mt-4 flex items-center gap-6">
+    <span class="text-emerald-400 font-bold text-lg">Score: <span id="score">0</span></span>
+    <button onclick="resetGame()" class="px-4 py-1.5 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black font-bold text-xs">Reset</button>
+  </div>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let score = 0;
+    let target = { x: 220, y: 150, r: 24, dx: 3, dy: 3 };
+    function loop() {
+      ctx.clearRect(0,0,450,300);
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, target.r, 0, Math.PI*2);
+      ctx.fillStyle = '#ef4444';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      target.x += target.dx;
+      target.y += target.dy;
+      if (target.x < target.r || target.x > 450 - target.r) target.dx *= -1;
+      if (target.y < target.r || target.y > 300 - target.r) target.dy *= -1;
+      requestAnimationFrame(loop);
+    }
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const dist = Math.hypot(x - target.x, y - target.y);
+      if (dist <= target.r) {
+        score += 10;
+        document.getElementById('score').innerText = score;
+        target.x = Math.random() * 350 + 50;
+        target.y = Math.random() * 200 + 50;
+      }
+    });
+    function resetGame() {
+      score = 0;
+      document.getElementById('score').innerText = 0;
+      target.x = 220; target.y = 150;
+    }
+    loop();
+  </script>
+</body>
+</html>

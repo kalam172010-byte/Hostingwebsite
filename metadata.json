@@ -1,0 +1,6 @@
+{
+  "name": "TeleHost AI - Telethon Bot Builder & Auto-Approval Studio",
+  "description": "Build, simulate, and host Telegram Telethon bots for automated file downloads with customizable auto-approval logic, Python script generator, and live simulation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
