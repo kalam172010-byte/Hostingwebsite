@@ -99,6 +99,8 @@ export interface HostedPythonBot {
   exitCode?: number | null;
   startedAt: string;
   uptimeSeconds: number;
+  restartCount?: number;
+  autoRestartEnabled?: boolean;
   logs: string[];
   description?: string;
   botId?: string; // which master bot received it

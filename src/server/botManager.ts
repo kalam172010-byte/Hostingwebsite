@@ -466,6 +466,11 @@ export function sanitizeAndFixPythonCode(rawCode: string): string {
     return `f"${p1}{${p2}'${p3}'${p4}}${p5}"`;
   });
 
+  // Upgrade standard telebot bot.polling() to infinity_polling so network blips never crash the bot
+  if (code.includes('import telebot') || code.includes('from telebot import')) {
+    code = code.replace(/\bbot\.polling\s*\([^)]*\)/g, 'bot.infinity_polling(timeout=25, long_polling_timeout=25)');
+  }
+
   // Ensure import os is present at the very top before any os.getenv calls
   const hasOsImport = code.includes('import os') || code.includes('from os import');
   let header = hasOsImport ? '' : 'import os\n';
@@ -652,6 +657,9 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
       botInfo.exitCode = code;
       runningProcesses.delete(botInfo.id);
 
+      botInfo.logs.push(`--- [${new Date().toLocaleTimeString()}] Process exited with code ${code} ---`);
+      addLog(botInfo.botId || 'python_engine', code === 0 ? 'INFO' : 'WARN', `Bot "${botInfo.name}" (${botInfo.id}) process exited (code ${code})`);
+
       if (code !== 0 && code !== null) {
         // Attempt autonomous healing
         const healed = await handleAutoHealPythonBot(botInfo, runStderr);
@@ -664,9 +672,23 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
         await notifyUserOfBotError(botInfo, runStderr);
       }
 
-      botInfo.status = code === 0 ? 'STOPPED' : 'ERROR';
-      botInfo.logs.push(`--- [${new Date().toLocaleTimeString()}] Process exited with code ${code} ---`);
-      addLog(botInfo.botId || 'python_engine', code === 0 ? 'INFO' : 'WARN', `Bot "${botInfo.name}" (${botInfo.id}) process exited (code ${code})`);
+      // 24/7 AUTO-RESTART SUPERVISOR:
+      // If the bot was NOT explicitly stopped by the user, automatically restart it after a brief backoff
+      if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED') {
+        botInfo.status = 'RUNNING';
+        botInfo.restartCount = (botInfo.restartCount || 0) + 1;
+        const delayMs = Math.min(1000 + ((botInfo.restartCount - 1) % 5) * 1000, 5000);
+        botInfo.logs.push(`[24/7 SUPERVISOR] 🔄 Auto-restarting bot worker in ${Math.round(delayMs / 1000)}s (Restart #${botInfo.restartCount}) to maintain 24/7 online status...`);
+        addLog(botInfo.botId || 'python_engine', 'INFO', `[24/7 SUPERVISOR] Auto-restarting "${botInfo.name}" (${botInfo.id}) to maintain 24/7 uptime.`);
+        
+        setTimeout(() => {
+          if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED' && !runningProcesses.has(botInfo.id)) {
+            spawnPythonBotProcess(botInfo);
+          }
+        }, delayMs);
+      } else {
+        botInfo.status = 'STOPPED';
+      }
     });
 
     child.on('error', (err: any) => {
@@ -675,6 +697,14 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
       runningProcesses.delete(botInfo.id);
       addLog(botInfo.botId || 'python_engine', 'ERROR', `Failed running python bot "${botInfo.name}": ${err.message}`);
       notifyUserOfBotError(botInfo, err.message);
+
+      if (botInfo.autoRestartEnabled !== false) {
+        setTimeout(() => {
+          if (botInfo.autoRestartEnabled !== false && !runningProcesses.has(botInfo.id)) {
+            spawnPythonBotProcess(botInfo);
+          }
+        }, 3000);
+      }
     });
 
     addLog(botInfo.botId || 'python_engine', 'SUCCESS', `🚀 [PYTHON BOT ONLINE] "${botInfo.name}" is now running with PID ${child.pid}`);
@@ -887,6 +917,8 @@ export async function deployPythonBotFromZip(
 export function startPythonBot(id: string): boolean {
   const bot = hostedPythonBots.find(b => b.id === id);
   if (!bot) return false;
+  bot.autoRestartEnabled = true;
+  bot.status = 'RUNNING';
   return spawnPythonBotProcess(bot);
 }
 
@@ -897,23 +929,21 @@ export function stopPythonBot(id: string): boolean {
   const bot = hostedPythonBots.find(b => b.id === id);
   if (!bot) return false;
 
+  bot.autoRestartEnabled = false;
+  bot.status = 'STOPPED';
+
   const child = runningProcesses.get(id);
   if (child) {
     try {
       child.kill('SIGTERM');
-      bot.status = 'STOPPED';
-      bot.logs.push(`--- [${new Date().toLocaleTimeString()}] Bot manually stopped by user ---`);
-      runningProcesses.delete(id);
-      addLog(bot.botId || 'python_engine', 'WARN', `Bot "${bot.name}" (${id}) stopped.`);
-      return true;
     } catch (e: any) {
       console.error('Error stopping python bot:', e);
-      return false;
     }
-  } else {
-    bot.status = 'STOPPED';
-    return true;
+    runningProcesses.delete(id);
   }
+  bot.logs.push(`--- [${new Date().toLocaleTimeString()}] Bot manually stopped by user ---`);
+  addLog(bot.botId || 'python_engine', 'WARN', `Bot "${bot.name}" (${id}) stopped by user.`);
+  return true;
 }
 
 /**
@@ -2799,3 +2829,23 @@ process.on('SIGTERM', async () => {
     } catch (e) {}
   }
 });
+
+// 24/7 PROCESS SUPERVISOR & KEEPALIVE WATCHDOG
+// Periodically checks all hosted python bots and ensures they remain alive and running 24/7
+setInterval(() => {
+  hostedPythonBots.forEach(bot => {
+    if (bot.status === 'RUNNING' || bot.autoRestartEnabled !== false) {
+      if (bot.status !== 'STOPPED') {
+        const proc = runningProcesses.get(bot.id);
+        if (!proc || proc.killed || proc.exitCode !== null) {
+          bot.logs.push(`[24/7 WATCHDOG] ⚡ Detected dead worker for "${bot.name}". Reviving process now...`);
+          addLog(bot.botId || 'python_engine', 'INFO', `[24/7 WATCHDOG] Reviving "${bot.name}" (${bot.id}) to ensure 24/7 continuous uptime.`);
+          spawnPythonBotProcess(bot);
+        } else {
+          bot.uptimeSeconds = (bot.uptimeSeconds || 0) + 10;
+        }
+      }
+    }
+  });
+}, 10000);
+
