@@ -27,7 +27,8 @@ import {
   sendTestTelegramMessage,
   setServerBaseUrl,
   getSystemStats,
-  updatePythonBotEnv 
+  updatePythonBotEnv,
+  resetDailyUploadLimit
 } from './src/server/botManager';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -545,6 +546,11 @@ Return JSON in format:
     console.error('Error in /api/optimize-rules:', err);
     return res.status(500).json({ error: err.message || 'Failed to optimize rules' });
   }
+});
+
+app.post('/api/admin/reset-limits', (_req, res) => {
+  resetDailyUploadLimit();
+  res.json({ success: true, message: 'All daily upload limits have been reset.' });
 });
 
 app.get('/api/health', (_req, res) => {

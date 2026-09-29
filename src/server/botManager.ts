@@ -176,7 +176,8 @@ export function checkAndIncrementDailyUploadLimit(senderId: number): { allowed: 
   const todayStr = new Date().toISOString().split('T')[0];
   const key = `${senderId}_${todayStr}`;
   const currentCount = userDailyUploads.get(key) || 0;
-  const LIMIT = 2;
+  // Generous limit to prevent users getting locked out while testing
+  const LIMIT = 20;
 
   if (currentCount >= LIMIT) {
     return { allowed: false, currentCount, limit: LIMIT };
@@ -185,6 +186,16 @@ export function checkAndIncrementDailyUploadLimit(senderId: number): { allowed: 
   userDailyUploads.set(key, currentCount + 1);
   saveDailyUploadsManifest();
   return { allowed: true, currentCount: currentCount + 1, limit: LIMIT };
+}
+
+export function resetDailyUploadLimit(senderId?: number) {
+  if (senderId) {
+    const todayStr = new Date().toISOString().split('T')[0];
+    userDailyUploads.delete(`${senderId}_${todayStr}`);
+  } else {
+    userDailyUploads.clear();
+  }
+  saveDailyUploadsManifest();
 }
 
 export async function notifyUserOfBotError(botInfo: HostedPythonBot, errorDetails: string) {
@@ -450,6 +461,17 @@ const PACKAGE_ALIAS_MAP: Record<string, string> = {
 export function sanitizeAndFixPythonCode(rawCode: string): string {
   let code = rawCode.replace(/\r\n/g, '\n').replace(/^\uFEFF/, '');
   
+  // Fix trailing quotes on imports (e.g., import hashlib"")
+  code = code.replace(/import\s+([a-zA-Z0-9_]+)""/g, 'import $1');
+
+  // Fix unquoted admin contacts like ADMIN_CONTACT = @Username
+  code = code.replace(/^(\s*ADMIN_CONTACT\s*=\s*)(@[a-zA-Z0-9_]+)/gm, '$1"$2"');
+
+  // Fix common Python 3.11 nested double quote f-string bug: f"{func("arg")}" -> f"{func('arg')}"
+  code = code.replace(/f"([^"\n]*?)\{([^{}\n]*?)"([^"\n]*?)"([^{}\n]*?)\}([^"\n]*?)"/g, (match, p1, p2, p3, p4, p5) => {
+    return `f"${p1}{${p2}'${p3}'${p4}}${p5}"`;
+  });
+
   // Ensure import os is present at the very top before any os.getenv calls
   const hasOsImport = code.includes('import os') || code.includes('from os import');
   let header = hasOsImport ? '' : 'import os\n';
@@ -490,10 +512,14 @@ export async function handleAutoHealPythonBot(
 
     try {
       const pipProc = spawn('python3', ['-m', 'pip', 'install', '--break-system-packages', pkgName]);
-      await new Promise((resolve) => pipProc.on('close', resolve));
-      botInfo.logs.push(`[AUTO-HEALER] ✅ Successfully installed "${pkgName}". Restarting bot worker...`);
-      spawnPythonBotProcess(botInfo);
-      return true;
+      const exitCode = await new Promise((resolve) => pipProc.on('close', resolve));
+      if (exitCode === 0) {
+        botInfo.logs.push(`[AUTO-HEALER] ✅ Successfully installed "${pkgName}". Restarting bot worker...`);
+        spawnPythonBotProcess(botInfo);
+        return true;
+      } else {
+        botInfo.logs.push(`[AUTO-HEALER] ⚠️ Pip installation of ${pkgName} failed (exit code ${exitCode}).`);
+      }
     } catch (e: any) {
       botInfo.logs.push(`[AUTO-HEALER] ⚠️ Pip installation of ${pkgName} failed: ${e.message}`);
     }
