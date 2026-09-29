@@ -555,7 +555,9 @@ app.get('/api/health', (_req, res) => {
 const PORT = process.env.PORT || 3000;
 
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const isProduction = process.env.NODE_ENV === 'production' || !fs.existsSync(path.resolve(__dirname, 'server.ts'));
+
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'custom',
@@ -578,10 +580,21 @@ async function startServer() {
       }
     });
   } else {
-    const distPath = path.resolve(__dirname, 'dist');
+    const distPath = fs.existsSync(path.resolve(__dirname, 'dist'))
+      ? path.resolve(__dirname, 'dist')
+      : __dirname;
+
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get('*', (req, res, next) => {
+      if (req.originalUrl.startsWith('/sites') || req.originalUrl.startsWith('/api')) {
+        return next();
+      }
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send('Not Found');
+      }
     });
   }
 
