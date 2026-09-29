@@ -621,12 +621,9 @@ class AdminStates(StatesGroup):
     add_prod_price = State()
     add_prod_reseller_price = State()
     add_prod_apk = State()
-    add_prod_keys = State()
     
     edit_prod_field = State()
     wait_for_new_value = State()
-    wait_for_add_keys = State()
-    wait_for_delete_key = State()
     
     broadcast_msg = State()
     add_coupon_code = State()
@@ -986,6 +983,64 @@ async def verify_fampay_payment(order_id: str) -> Dict[str, Any]:
             logger.warning(f"Gateway verify exception: {e}")
 
     return {"status": "error", "message": "Payment not received yet. Please wait 10-30 seconds after paying."}
+
+async def generate_bantibhaiya_key(pid: str, duration: str, device_limit: str = "1") -> Tuple[bool, str]:
+    """Generates a real-time key from Bantibhaiya Reseller API using Product PID and Duration."""
+    api_url = (get_setting("reseller_api_url", RESELLER_API_URL) or "https://bantibhaiya.to/api/reseller_v1.php").strip()
+    api_key = (get_setting("reseller_api_key", RESELLER_API_KEY) or "").strip()
+    master_key = (get_setting("reseller_master_key", RESELLER_MASTER_KEY) or "").strip()
+
+    if not api_key:
+        logger.warning("Bantibhaiya Reseller API Key is not set in Admin Settings!")
+        return False, "Bantibhaiya Reseller API Key is not configured in Admin Settings."
+
+    actions_to_try = ["gen_key", "generate", "create", "create_key", "buy"]
+    last_error = "Unknown error"
+
+    for act in actions_to_try:
+        payload = {
+            "api_key": api_key,
+            "action": act,
+            "product_pid": pid,
+            "pid": pid,
+            "product_id": pid,
+            "duration": duration,
+            "validity": duration,
+            "devices": device_limit or "1",
+            "device_limit": device_limit or "1",
+            "master_key": master_key,
+            "amount": 1,
+            "count": 1
+        }
+        try:
+            form_data = urllib.parse.urlencode(payload).encode("utf-8")
+            status, body = await http_request(
+                "POST", 
+                api_url, 
+                data=form_data, 
+                headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Mozilla/5.0"}, 
+                timeout=15
+            )
+            text = body.decode("utf-8", errors="replace").strip()
+            if text:
+                try:
+                    data = json.loads(text)
+                    if isinstance(data, dict):
+                        if data.get("status") in ("success", "ok", True) or data.get("success") is True:
+                            key = data.get("key") or data.get("license") or data.get("serial") or (data.get("data", {}).get("key") if isinstance(data.get("data"), dict) else None)
+                            if key:
+                                return True, str(key).strip()
+                        if data.get("status") == "error":
+                            msg = data.get("msg") or data.get("message") or "API error"
+                            last_error = str(msg)
+                except json.JSONDecodeError:
+                    if not text.startswith("<") and len(text) < 120 and "error" not in text.lower():
+                        return True, text
+        except Exception as e:
+            logger.warning(f"Error calling Bantibhaiya action {act}: {e}")
+            last_error = str(e)
+
+    return False, last_error
 
 def credit_verified_payment_once(user_id: int, order_id: str, amount: float) -> bool:
     """Atomically mark a pending order paid and credit the wallet once."""
@@ -1648,7 +1703,7 @@ async def view_panel_names(call: CallbackQuery):
     category = call.data.split("cat_", 1)[1]
     panel_names = db_query("SELECT DISTINCT panel_name FROM products WHERE category = ? AND is_active=1 AND panel_name != ''", (category,), fetchall=True)
     if not panel_names:
-        prods = db_query("SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category FROM products WHERE category = ? AND is_active=1", (category,), fetchall=True)
+        prods = db_query("SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category, bantibhaiya_product_pid FROM products WHERE category = ? AND is_active=1", (category,), fetchall=True)
         if not prods: return await call.answer("❌ No products available in this category yet.", show_alert=True)
         await show_products_for_panel(call, prods, category)
         return
@@ -1666,7 +1721,7 @@ async def view_products_for_panel(call: CallbackQuery):
     parts = call.data.split("pnl_", 1)[1].split("_", 1)
     if len(parts) != 2: return await call.answer("Invalid selection.", show_alert=True)
     category, panel_name = parts[0], parts[1]
-    prods = db_query("SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category FROM products WHERE category = ? AND panel_name = ? AND is_active=1", (category, panel_name), fetchall=True)
+    prods = db_query("SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category, bantibhaiya_product_pid FROM products WHERE category = ? AND panel_name = ? AND is_active=1", (category, panel_name), fetchall=True)
     if not prods: return await call.answer("No products found for this panel.", show_alert=True)
     await show_products_for_panel(call, prods, f"{category} - {panel_name}")
 
@@ -1677,17 +1732,17 @@ async def show_products_for_panel(call: CallbackQuery, prods: List[Tuple], heade
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     text = f"{get_emoji('product_store')} <b><u>{header.upper()} PACKAGES</u></b>\n━━━━━━━━━━━━━━━━━━\n\n"
     for p in prods:
-        # Note: products table query was changed above to include panel_name and category
-        # Ensure correct indexing for p based on the new query:
-        # SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category
-        prod_id, package_name, normal_price, stock, reseller_price, validity, device, panel_name_from_db, category_from_db = p
+        # SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category, bantibhaiya_product_pid
+        prod_id, package_name, normal_price, stock, reseller_price, validity, device, panel_name_from_db, category_from_db, bb_pid = p
         
         normal_price = safe_float(normal_price)
         reseller_price = safe_float(reseller_price)
         base_price = reseller_price if is_reseller else normal_price
         if is_vip: display_price = base_price - (base_price * (VIP_DISCOUNT_PERCENTAGE / 100))
         else: display_price = base_price
-        stock_status = "✅ In Stock" if stock > 0 else "❌ Out of Stock"
+        
+        is_available = bool(bb_pid) or (stock > 0)
+        stock_status = "⚡ Instant Auto-Key" if bb_pid else ("✅ In Stock" if stock > 0 else "❌ Out of Stock")
         
         text += f"{get_emoji('product_store')} ⏱ <b>Validity: {package_name}</b>\n"
         if is_reseller or is_vip:
@@ -1697,7 +1752,7 @@ async def show_products_for_panel(call: CallbackQuery, prods: List[Tuple], heade
             else: text += f"👑🌟 <b>Super Price: {fmt_curr(display_price)}</b>\n"
         else: text += f"💰 Price: {fmt_curr(normal_price)}\n"
         text += f"📱 Limit: {device} | 📦 {stock_status}\n\n"
-        if stock > 0:
+        if is_available:
             kb.inline_keyboard.append([InlineKeyboardButton(text=f"Buy {package_name} - {fmt_curr(display_price)}", callback_data=f"buy_{prod_id}", icon_custom_emoji_id=get_emoji_icon("product_store"), style="success")])
         else:
             kb.inline_keyboard.append([InlineKeyboardButton(text=f"❌ {package_name} (Out of Stock)", callback_data="ignore_stock_click", style="danger")])
@@ -1707,17 +1762,16 @@ async def show_products_for_panel(call: CallbackQuery, prods: List[Tuple], heade
 
 @dp.callback_query(F.data == "ignore_stock_click")
 async def ignore_stock_click(call: CallbackQuery):
-    await call.answer("⚠️ This duration is completely Out of Stock! Admins have been notified to refill.", show_alert=True)
+    await call.answer("⚠️ This duration is currently Out of Stock! Admins have been notified.", show_alert=True)
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(call: CallbackQuery):
     prod_id = int(call.data.split("_")[1])
-    prod = db_query("SELECT name, price_inr, stock, apk_link, validity, device_limit, category, reseller_price, panel_name FROM products WHERE id=?", (prod_id,), fetchone=True)
+    prod = db_query("SELECT name, price_inr, stock, apk_link, validity, device_limit, category, reseller_price, panel_name, bantibhaiya_product_pid, bantibhaiya_product_duration FROM products WHERE id=?", (prod_id,), fetchone=True)
     user = db_query("SELECT balance, is_reseller, total_saved, is_vip FROM users WHERE user_id=?", (call.from_user.id,), fetchone=True)
-    if not prod: return await call.answer("❌ Critical Error: Item not found in DB!", show_alert=True)
+    if not prod: return await call.answer("❌ Item not found in DB!", show_alert=True)
     
-    # Unpack prod data carefully as it's used repeatedly
-    prod_name, normal_price, stock_count, apk_link, validity, device_limit, category_name, reseller_price, panel_name = prod
+    prod_name, normal_price, stock_count, apk_link, validity, device_limit, category_name, reseller_price, panel_name, bb_pid, bb_duration = prod
     
     normal_price = safe_float(normal_price)
     reseller_price = safe_float(reseller_price)
@@ -1726,27 +1780,47 @@ async def process_buy(call: CallbackQuery):
     if is_vip: final_price = base_price - (base_price * (VIP_DISCOUNT_PERCENTAGE / 100))
     else: final_price = base_price
     savings = normal_price - final_price
-    if user[0] < final_price: return await call.answer(f"❌ Insufficient Balance! You need {fmt_curr(final_price)}.\nPlease Top Up your wallet.", show_alert=True)
     
-    db_query("UPDATE users SET balance=?, spent=spent+?, orders_count=orders_count+1, total_saved=total_saved+? WHERE user_id=?", (user[0] - final_price, final_price, savings, call.from_user.id))
+    if user[0] < final_price: 
+        return await call.answer(f"❌ Insufficient Balance! You need {fmt_curr(final_price)}.\nPlease Top Up your wallet.", show_alert=True)
+    
     delivered_key = ""
-    if stock_count > 0:
-        key_data = db_query("SELECT id, key_text FROM product_keys WHERE product_id=? AND is_used=0 LIMIT 1", (prod_id,), fetchone=True)
-        if key_data:
-            delivered_key = key_data[1]
-            db_query("UPDATE product_keys SET is_used=1 WHERE id=?", (key_data[0],))
-            db_query("UPDATE products SET stock=stock-1 WHERE id=?", (prod_id,))
-        else: delivered_key = "OUT_OF_STOCK_CONTACT_ADMIN_CODE_01"
-    else: delivered_key = "OUT_OF_STOCK_CONTACT_ADMIN_CODE_02"
+    # 1. Generate key directly from Bantibhaiya Reseller API using Product PID & Duration
+    if bb_pid and bb_duration:
+        await call.answer("⚡ Generating key from Bantibhaiya Server...", show_alert=False)
+        success, key_or_err = await generate_bantibhaiya_key(bb_pid, bb_duration, device_limit)
+        if not success:
+            logger.error(f"Bantibhaiya key gen failed for user {call.from_user.id}: {key_or_err}")
+            try:
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"⚠️ <b>BANTIBHAIYA RESELLER API ERROR</b>\n\n"
+                    f"👤 <b>User:</b> <code>{call.from_user.id}</code> (@{call.from_user.username or 'none'})\n"
+                    f"📦 <b>Product:</b> {category_name} - {panel_name} ({prod_name})\n"
+                    f"🔑 <b>PID:</b> <code>{bb_pid}</code> | <b>Duration:</b> <code>{bb_duration}</code>\n"
+                    f"❌ <b>Error:</b> <code>{html.escape(str(key_or_err))}</code>\n\n"
+                    f"<i>User balance was NOT deducted. Check your Reseller API key/balance.</i>",
+                    parse_mode='HTML'
+                )
+            except Exception:
+                pass
+            return await call.answer(f"❌ Key Generation Failed:\n{key_or_err}\n\nYour balance is SAFE (NOT deducted).", show_alert=True)
+        delivered_key = str(key_or_err).strip()
+    else:
+        # Fallback to local stock if no PID configured
+        if stock_count > 0:
+            key_data = db_query("SELECT id, key_text FROM product_keys WHERE product_id=? AND is_used=0 LIMIT 1", (prod_id,), fetchone=True)
+            if key_data:
+                delivered_key = key_data[1]
+                db_query("UPDATE product_keys SET is_used=1 WHERE id=?", (key_data[0],))
+                db_query("UPDATE products SET stock=stock-1 WHERE id=?", (prod_id,))
+            else:
+                return await call.answer("❌ Out of stock! No Bantibhaiya PID configured for this product.", show_alert=True)
+        else:
+            return await call.answer("❌ Out of stock! Please contact Admin to configure Bantibhaiya PID.", show_alert=True)
     
-    # The original referral logic seems to refer to user[1] as a user_id, but it's a boolean.
-    # If a referral system is intended, there should be a `referred_by` column in users table
-    # and `user[1]` would need to be `referred_by_user_id` instead of `is_reseller`.
-    # As it stands, this part will not work as intended or could raise errors if user[1] is false (0).
-    # I'll comment out the commission logic, as it's not well-defined with `user[1]` as `is_reseller`.
-    # if user[1]: # This means "if is_reseller"
-    #     commission = final_price * 0.15 
-    #     db_query("UPDATE users SET balance=balance+?, referral_earned=referral_earned+? WHERE user_id=?", (commission, commission, user[1])) # user[1] is boolean, this would try to update user_id=0 or 1
+    # Deduct wallet balance only AFTER key is generated
+    db_query("UPDATE users SET balance=?, spent=spent+?, orders_count=orders_count+1, total_saved=total_saved+? WHERE user_id=?", (user[0] - final_price, final_price, savings, call.from_user.id))
     
     product_full_name = f"{category_name} - {panel_name} ({prod_name})"
     db_query("INSERT INTO orders (user_id, product_name, price_paid, delivered_key, purchase_date) VALUES (?, ?, ?, ?, ?)", (call.from_user.id, product_full_name, final_price, delivered_key, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
@@ -1755,10 +1829,7 @@ async def process_buy(call: CallbackQuery):
     
     msg = (f"✅ <b>PURCHASE SUCCESSFUL!</b>\n━━━━━━━━━━━━━━━━━━\n📦 <b>Panel:</b> {category_name}\n📁 <b>Panel Name:</b> {panel_name}\n⏱ <b>Package:</b> {prod_name}\n💰 <b>Amount Deducted:</b> {fmt_curr(final_price)}\n📱 <b>Device Limit:</b> {device_limit}\n━━━━━━━━━━━━━━━━━━\n")
     if apk_link and apk_link.startswith("http"): msg += f"📥 <b>APK Link:</b> <a href='{apk_link}'>Click Here to Download</a>\n\n"
-    if "OUT_OF_STOCK" in delivered_key:
-        msg += f"⚠️ <b>CRITICAL INVENTORY ALERT</b>\nYour money was deducted, but the key vault was empty. Contact Admin immediately with this message: {ADMIN_CONTACT}\n"
-    else:
-        msg += f"🔑 <b>Your Exclusive Key:</b>\n<code>{delivered_key}</code>\n\n<i>For any issues or guide, tap Support or contact: {ADMIN_CONTACT}</i>"
+    msg += f"🔑 <b>Your Exclusive Key:</b>\n<code>{delivered_key}</code>\n\n<i>For any issues or guide, tap Support or contact: {ADMIN_CONTACT}</i>"
     await call.message.edit_text(msg, reply_markup=back_kb("menu_shop"), disable_web_page_preview=True, parse_mode='HTML')
 
 # ==============================================================================
@@ -2170,15 +2241,15 @@ async def add_prod_name(m: Message, state: FSMContext):
 
 @dp.message(AdminStates.add_prod_validity)
 async def add_prod_validity(m: Message, state: FSMContext):
-    await state.update_data(validity=m.text)
-    await m.answer("🔑 Enter <b>Bantibhaiya Product PID</b> for this product (example: <code>PRODUCT_PID_ID</code>).\n\nIf this product does not use Bantibhaiya API, type <code>none</code>.", parse_mode='HTML')
+    await state.update_data(validity=m.text.strip())
+    await m.answer("🔑 Enter <b>Bantibhaiya Product PID</b> for this product (example: <code>PRODUCT_PID_123</code>):", parse_mode='HTML')
     await state.set_state(AdminStates.add_prod_bantibhaiya_pid)
 
 @dp.message(AdminStates.add_prod_bantibhaiya_pid)
 async def add_prod_bantibhaiya_pid(m: Message, state: FSMContext):
     pid = "" if m.text.strip().lower() == 'none' else m.text.strip()
     await state.update_data(bantibhaiya_product_pid=pid)
-    await m.answer("⏱ Enter <b>Bantibhaiya Product Duration</b> exactly as the API expects (example: <code>1 Day</code>, <code>7 Days</code>, <code>1 Month</code>).\n\nIf not using Bantibhaiya API, type <code>none</code>.", parse_mode='HTML')
+    await m.answer("⏱ Enter <b>Bantibhaiya Product Duration</b> exactly as the API expects (example: <code>1 Day</code>, <code>7 Days</code>, <code>1 Month</code>):", parse_mode='HTML')
     await state.set_state(AdminStates.add_prod_bantibhaiya_duration)
 
 @dp.message(AdminStates.add_prod_bantibhaiya_duration)
@@ -2190,14 +2261,14 @@ async def add_prod_bantibhaiya_duration(m: Message, state: FSMContext):
 
 @dp.message(AdminStates.add_prod_device_limit)
 async def add_prod_device_limit(m: Message, state: FSMContext):
-    await state.update_data(device_limit=m.text)
+    await state.update_data(device_limit=m.text.strip())
     await m.answer("💰 Enter standard **User Price** in Rupees (₹) (e.g., 500):", parse_mode='HTML')
     await state.set_state(AdminStates.add_prod_price)
 
 @dp.message(AdminStates.add_prod_price)
 async def add_prod_price(m: Message, state: FSMContext):
     try:
-        await state.update_data(price=float(m.text))
+        await state.update_data(price=float(m.text.strip()))
         await m.answer("👑 Enter wholesale **Reseller Price** in Rupees (₹) (e.g., 300):", parse_mode='HTML')
         await state.set_state(AdminStates.add_prod_reseller_price)
     except ValueError: await m.answer("❌ Invalid input datatype! Must be numerical.")
@@ -2205,44 +2276,59 @@ async def add_prod_price(m: Message, state: FSMContext):
 @dp.message(AdminStates.add_prod_reseller_price)
 async def add_prod_reseller_price(m: Message, state: FSMContext):
     try:
-        await state.update_data(reseller_price=float(m.text))
+        await state.update_data(reseller_price=float(m.text.strip()))
         await m.answer("🔗 Enter direct APK/Payload Download Link (or type 'none' to omit):", parse_mode='HTML')
         await state.set_state(AdminStates.add_prod_apk)
     except ValueError: await m.answer("❌ Invalid input datatype! Must be numerical.")
 
 @dp.message(AdminStates.add_prod_apk)
 async def add_prod_apk(m: Message, state: FSMContext):
-    await state.update_data(apk="" if m.text.lower() == 'none' else m.text)
-    await m.answer("📥 <b>Vault Injection Phase</b>\n\nPaste all the license <b>Keys</b> exactly as formatted (1 key per newline):", parse_mode='HTML')
-    await state.set_state(AdminStates.add_prod_keys)
-
-@dp.message(AdminStates.add_prod_keys)
-async def add_prod_keys(m: Message, state: FSMContext):
-    keys = [k.strip() for k in m.text.strip().split('\n') if k.strip()]
+    apk_val = "" if m.text.strip().lower() == 'none' else m.text.strip()
+    await state.update_data(apk=apk_val)
     data = await state.get_data()
-    stock = len(keys)
+    
+    bb_pid = data.get('bantibhaiya_product_pid', '').strip()
+    bb_duration = data.get('bantibhaiya_product_duration', '').strip()
+    
     conn = sqlite3.connect('Cuibcc.db')
     c = conn.cursor()
-    c.execute("INSERT INTO products (category, panel_name, name, price_inr, reseller_price, stock, apk_link, validity, device_limit, bantibhaiya_product_pid, bantibhaiya_product_duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (data['cat'], data['panel_name'], data['name'], data['price'], data['reseller_price'], stock, data['apk'], data['validity'], data['device_limit'], data.get('bantibhaiya_product_pid', ''), data.get('bantibhaiya_product_duration', '')))
-    prod_id = c.lastrowid
-    for k in keys: c.execute("INSERT INTO product_keys (product_id, key_text) VALUES (?, ?)", (prod_id, k))
+    c.execute(
+        "INSERT INTO products (category, panel_name, name, price_inr, reseller_price, stock, apk_link, validity, device_limit, bantibhaiya_product_pid, bantibhaiya_product_duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (data['cat'], data['panel_name'], data['name'], data['price'], data['reseller_price'], 999, apk_val, data['validity'], data['device_limit'], bb_pid, bb_duration)
+    )
     conn.commit()
     conn.close()
-    await m.answer(f"✅ <b>Data Deployment Successful!</b>\n\n📦 Panel '{data['cat']}' -> Panel Name '{data['panel_name']}' -> Package '{data['name']}'\n🔒 Vault Stock: {stock} Keys injected.\n💰 User Price: {fmt_curr(data['price'])} | 👑 Reseller: {fmt_curr(data['reseller_price'])}", reply_markup=admin_kb(), parse_mode='HTML')
+    
+    await m.answer(
+        f"✅ <b>Product Successfully Created!</b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"📦 <b>Category:</b> {data['cat']}\n"
+        f"📁 <b>Panel Name:</b> {data['panel_name']}\n"
+        f"⏱ <b>Package:</b> {data['name']}\n"
+        f"🔑 <b>Bantibhaiya PID:</b> <code>{bb_pid or 'Not Set'}</code>\n"
+        f"⏱ <b>Bantibhaiya Duration:</b> <code>{bb_duration or 'Not Set'}</code>\n"
+        f"📱 <b>Device Limit:</b> {data['device_limit']}\n"
+        f"💰 <b>User Price:</b> {fmt_curr(data['price'])}\n"
+        f"👑 <b>Reseller Price:</b> {fmt_curr(data['reseller_price'])}\n"
+        f"📥 <b>APK Link:</b> {apk_val if apk_val else 'None'}\n\n"
+        f"⚡ <i>Keys will be automatically generated from Bantibhaiya Reseller API upon user purchase!</i>",
+        reply_markup=admin_kb(),
+        parse_mode='HTML'
+    )
     await state.clear()
 
 @dp.callback_query(F.data == "admin_manage_prods")
 async def admin_manage_prods(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID: return
-    prods = db_query("SELECT id, name, category, panel_name, stock, is_active FROM products ORDER BY category, panel_name", fetchall=True)
+    prods = db_query("SELECT id, name, category, panel_name, stock, is_active, bantibhaiya_product_pid FROM products ORDER BY category, panel_name", fetchall=True)
     if not prods: return await call.message.edit_text("📦 Store Database is completely empty.", reply_markup=admin_back_kb(), parse_mode='HTML')
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     for p in prods:
         status_dot = "🟢" if p[5] else "🔴"
         panel_name = p[3] if p[3] is not None else ""
-        kb.inline_keyboard.append([InlineKeyboardButton(text=f"{status_dot} [{p[2]}] {panel_name} - {p[1]} (Stock: {p[4]})", callback_data=f"admin_view_p_{p[0]}", style="primary")])
+        engine_tag = "⚡ Auto-API" if p[6] else f"Stock: {p[4]}"
+        kb.inline_keyboard.append([InlineKeyboardButton(text=f"{status_dot} [{p[2]}] {panel_name} - {p[1]} ({engine_tag})", callback_data=f"admin_view_p_{p[0]}", style="primary")])
     kb.inline_keyboard.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
-    await call.message.edit_text("📦 <b>Database Editor: Select Node to modify</b>", reply_markup=kb, parse_mode='HTML')
+    await call.message.edit_text("📦 <b>Database Editor: Select Product to modify</b>", reply_markup=kb, parse_mode='HTML')
 
 @dp.callback_query(F.data.startswith("admin_view_p_"))
 async def admin_view_product(call: CallbackQuery):
@@ -2250,11 +2336,28 @@ async def admin_view_product(call: CallbackQuery):
     try:
         p_id = int(call.data.split("_")[3])
         prod = db_query("SELECT * FROM products WHERE id=?", (p_id,), fetchone=True)
-        if not prod: return await call.answer("❌ Architecture fault: Node lost!", show_alert=True)
+        if not prod: return await call.answer("❌ Item not found!", show_alert=True)
         panel_name = prod[2] if prod[2] is not None else ""
         price_inr = safe_float(prod[4])
         reseller_price = safe_float(prod[5])
-        text = (f"📦 <b><u>NODE DEEP DIVE DETAILS</u></b>\n━━━━━━━━━━━━━━━━━━\n<b>ID:</b> <code>{prod[0]}</code>\n<b>Panel Group:</b> {prod[1]}\n<b>Panel Name:</b> {panel_name}\n<b>Package Date/Time:</b> {prod[3]}\n<b>Standard Price:</b> {fmt_curr(price_inr)}\n👑 <b>Wholesale Price:</b> {fmt_curr(reseller_price)}\n<b>Vault Stock:</b> {prod[6]}\n<b>Payload Link:</b> {prod[7] if prod[7] else 'None'}\n<b>Time Config:</b> {prod[8]}\n<b>HWID Limit:</b> {prod[9]}\n🔑 <b>Bantibhaiya PID:</b> {prod[10] or 'Not set'}\n⏱ <b>Bantibhaiya Duration:</b> {prod[11] or 'Not set'}\n<b>Visibility:</b> {'Active' if prod[12] else 'Hidden'}\n━━━━━━━━━━━━━━━━━━")
+        bb_pid = prod[10] or "Not set"
+        bb_duration = prod[11] or "Not set"
+        text = (
+            f"📦 <b><u>PRODUCT CONFIGURATION</u></b>\n━━━━━━━━━━━━━━━━━━\n"
+            f"<b>ID:</b> <code>{prod[0]}</code>\n"
+            f"<b>Panel Group:</b> {prod[1]}\n"
+            f"<b>Panel Name:</b> {panel_name}\n"
+            f"<b>Package Name:</b> {prod[3]}\n"
+            f"<b>Standard Price:</b> {fmt_curr(price_inr)}\n"
+            f"👑 <b>Wholesale Price:</b> {fmt_curr(reseller_price)}\n"
+            f"<b>Payload Link:</b> {prod[7] if prod[7] else 'None'}\n"
+            f"<b>Time Config:</b> {prod[8]}\n"
+            f"<b>HWID Limit:</b> {prod[9]}\n"
+            f"🔑 <b>Bantibhaiya PID:</b> <code>{bb_pid}</code>\n"
+            f"⏱ <b>Bantibhaiya Duration:</b> <code>{bb_duration}</code>\n"
+            f"⚡ <b>Key Engine:</b> Bantibhaiya Reseller API\n"
+            f"<b>Visibility:</b> {'Active' if prod[12] else 'Hidden'}\n━━━━━━━━━━━━━━━━━━"
+        )
         toggle_btn_text = "Hide Product 👁‍🗨" if prod[12] else "Unhide Product 👁"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Edit Panel Group 🏷️", callback_data=f"edit_p_{p_id}_cat", style="primary"), InlineKeyboardButton(text="Edit Panel Name 🏷️", callback_data=f"edit_p_{p_id}_panel_name", style="primary")],
@@ -2262,9 +2365,8 @@ async def admin_view_product(call: CallbackQuery):
             [InlineKeyboardButton(text="Edit Price 💰", callback_data=f"edit_p_{p_id}_price", style="primary"), InlineKeyboardButton(text="Edit R-Price 👑", callback_data=f"edit_p_{p_id}_rprice", style="primary")],
             [InlineKeyboardButton(text="Edit Validity ⏳", callback_data=f"edit_p_{p_id}_validity", style="primary"), InlineKeyboardButton(text="Edit Device 📱", callback_data=f"edit_p_{p_id}_device", style="primary")],
             [InlineKeyboardButton(text="Edit BB PID 🔑", callback_data=f"edit_p_{p_id}_bbpid", style="primary"), InlineKeyboardButton(text="Edit BB Duration ⏱", callback_data=f"edit_p_{p_id}_bbduration", style="primary")],
-            [InlineKeyboardButton(text="Edit APK Link 🔗", callback_data=f"edit_p_{p_id}_apk", style="primary"), InlineKeyboardButton(text="Add Keys ➕", callback_data=f"edit_p_{p_id}_keys", style="success")],
-            [InlineKeyboardButton(text="Delete Key 🗑", callback_data=f"delkey_p_{p_id}", style="danger"), InlineKeyboardButton(text=toggle_btn_text, callback_data=f"toggle_p_{p_id}", style="danger")],
-            [InlineKeyboardButton(text="Nuke Full Node 🗑", callback_data=f"delete_p_{p_id}", style="danger"), InlineKeyboardButton(text="BACK", callback_data="admin_manage_prods", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+            [InlineKeyboardButton(text="Edit APK Link 🔗", callback_data=f"edit_p_{p_id}_apk", style="primary"), InlineKeyboardButton(text=toggle_btn_text, callback_data=f"toggle_p_{p_id}", style="danger")],
+            [InlineKeyboardButton(text="Delete Product 🗑", callback_data=f"delete_p_{p_id}", style="danger"), InlineKeyboardButton(text="BACK", callback_data="admin_manage_prods", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
         ])
         await call.message.edit_text(text, reply_markup=kb, disable_web_page_preview=True, parse_mode='HTML')
     except Exception as e:
@@ -2281,33 +2383,35 @@ async def admin_toggle_product(call: CallbackQuery):
     await call.answer("Visibility updated successfully!", show_alert=True)
     await admin_view_product(call)
 
-# ==============================================================================
-# FIX: Edit product field – correctly handle different data types and multi-word fields
-# ==============================================================================
 @dp.callback_query(F.data.startswith("edit_p_"))
 async def start_edit_product(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
-    # Use split with maxsplit=3 to keep field name intact (may contain underscores)
     parts = call.data.split("_", 3)
     if len(parts) < 4:
         return await call.answer("Invalid callback data.", show_alert=True)
     p_id = int(parts[2])
     field = parts[3]
     await state.update_data(edit_p_id=p_id, edit_field=field)
-    if field == 'keys':
-        await call.message.edit_text("📥 <b>Vault Injection</b>\nPaste the <b>NEW KEYS</b> to append to the stock (1 key per line):", reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.wait_for_add_keys)
-    else:
-        field_name_map = {'cat': 'New Panel Group/Category Name', 'panel_name': 'New Panel Name', 'name': 'New Package/Date Name', 'price': 'New Standard Price in ₹', 'rprice': 'New Reseller Price in ₹', 'validity': 'New Time Validity String', 'device': 'New HWID Limit String', 'bbpid': 'New Bantibhaiya Product PID (or type "none")', 'bbduration': 'New Bantibhaiya Product Duration (or type "none")', 'apk': 'New Payload Link (or type "none")'}
-        await call.message.edit_text(f"✏️ Input the required data for: <b>{field_name_map.get(field, field)}</b>", reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.wait_for_new_value)
+    field_name_map = {
+        'cat': 'New Panel Group/Category Name',
+        'panel_name': 'New Panel Name',
+        'name': 'New Package/Date Name',
+        'price': 'New Standard Price in ₹',
+        'rprice': 'New Reseller Price in ₹',
+        'validity': 'New Time Validity String',
+        'device': 'New HWID Limit String',
+        'bbpid': 'New Bantibhaiya Product PID (or type "none")',
+        'bbduration': 'New Bantibhaiya Product Duration (or type "none")',
+        'apk': 'New Payload Link (or type "none")'
+    }
+    await call.message.edit_text(f"✏️ Input the required data for: <b>{field_name_map.get(field, field)}</b>", reply_markup=admin_back_kb(), parse_mode='HTML')
+    await state.set_state(AdminStates.wait_for_new_value)
 
 @dp.message(AdminStates.wait_for_new_value)
 async def process_edit_value(m: Message, state: FSMContext):
     data = await state.get_data()
     p_id = data['edit_p_id']; field = data['edit_field']; new_val = m.text.strip()
     
-    # Convert price fields to float, others remain strings
     if field in ['price', 'rprice']:
         try:
             new_val = float(new_val)
@@ -2315,25 +2419,10 @@ async def process_edit_value(m: Message, state: FSMContext):
             return await m.answer("❌ Invalid number format. Please enter a valid price (e.g., 500).")
     elif field in ['apk', 'bbpid', 'bbduration']:
         new_val = "" if new_val.lower() == 'none' else new_val
-    # For panel_name, cat, name, validity, device – keep as string
     
     db_col_map = {'cat': 'category', 'panel_name': 'panel_name', 'name': 'name', 'price': 'price_inr', 'rprice': 'reseller_price', 'validity': 'validity', 'device': 'device_limit', 'bbpid': 'bantibhaiya_product_pid', 'bbduration': 'bantibhaiya_product_duration', 'apk': 'apk_link'}
     db_query(f"UPDATE products SET {db_col_map[field]}=? WHERE id=?", (new_val, p_id))
-    await m.answer("✅ <b>Node updated gracefully!</b>", reply_markup=admin_kb(), parse_mode='HTML')
-    await state.clear()
-
-@dp.message(AdminStates.wait_for_add_keys)
-async def process_add_keys(m: Message, state: FSMContext):
-    data = await state.get_data()
-    p_id = data['edit_p_id']
-    keys = [k.strip() for k in m.text.strip().split('\n') if k.strip()]
-    if len(keys) == 0: return await m.answer("❌ Protocol breach: Zero valid keys found.", reply_markup=admin_kb(), parse_mode='HTML')
-    conn = sqlite3.connect('Cuibcc.db')
-    c = conn.cursor()
-    for k in keys: c.execute("INSERT INTO product_keys (product_id, key_text) VALUES (?, ?)", (p_id, k))
-    c.execute("UPDATE products SET stock = stock + ? WHERE id=?", (len(keys), p_id))
-    conn.commit(); conn.close()
-    await m.answer(f"✅ <b>Vault Secure!</b> {len(keys)} new keys appended and encrypted.", reply_markup=admin_kb(), parse_mode='HTML')
+    await m.answer("✅ <b>Product updated gracefully!</b>", reply_markup=admin_kb(), parse_mode='HTML')
     await state.clear()
 
 @dp.callback_query(F.data.startswith("delete_p_"))
@@ -2342,29 +2431,8 @@ async def admin_delete_product(call: CallbackQuery):
     p_id = int(call.data.split("_")[2])
     db_query("DELETE FROM products WHERE id=?", (p_id,))
     db_query("DELETE FROM product_keys WHERE product_id=?", (p_id,))
-    await call.answer("☢️ Nuclear wipe successful! Node and vault deleted.", show_alert=True)
+    await call.answer("🗑 Product deleted successfully!", show_alert=True)
     await admin_manage_prods(call)
-
-@dp.callback_query(F.data.startswith("delkey_p_"))
-async def admin_delete_key_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    p_id = int(call.data.split("_")[2])
-    await state.update_data(del_p_id=p_id)
-    await call.message.edit_text("🗑 Send the <b>exact string match</b> of the key you wish to purge from the vault:", reply_markup=admin_back_kb(), parse_mode='HTML')
-    await state.set_state(AdminStates.wait_for_delete_key)
-
-@dp.message(AdminStates.wait_for_delete_key)
-async def process_delete_key(m: Message, state: FSMContext):
-    data = await state.get_data()
-    p_id = data['del_p_id']
-    key_to_delete = m.text.strip()
-    key_data = db_query("SELECT id, is_used FROM product_keys WHERE product_id=? AND key_text=?", (p_id, key_to_delete), fetchone=True)
-    if not key_data: return await m.answer("❌ Key not found. Check logs and try again.", reply_markup=admin_back_kb(), parse_mode='HTML')
-    if key_data[1] == 1: return await m.answer("⚠️ Action Blocked: This key has already been dispatched to a user.", reply_markup=admin_back_kb(), parse_mode='HTML')
-    db_query("DELETE FROM product_keys WHERE id=?", (key_data[0],))
-    db_query("UPDATE products SET stock = stock - 1 WHERE id=?", (p_id,))
-    await m.answer(f"✅ Key <code>{key_to_delete}</code> securely purged from vault.\n📦 Database indices updated.", reply_markup=admin_kb(), parse_mode='HTML')
-    await state.clear()
 
 # ==============================================================================
 # 21. ADMIN TICKETS, BROADCAST, COUPONS
