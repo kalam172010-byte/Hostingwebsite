@@ -551,8 +551,29 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', engine: 'TeleHost Telethon Studio', hostedSitesReady: true });
 });
 
-// Vite Middleware setup for dev vs static in prod
-const PORT = process.env.PORT || 3000;
+function getListenPort(): number {
+  const args = process.argv;
+  const pIdx = args.indexOf('--port') !== -1 ? args.indexOf('--port') : args.indexOf('-p');
+  if (pIdx !== -1 && args[pIdx + 1]) {
+    const val = parseInt(args[pIdx + 1], 10);
+    if (!isNaN(val)) return val;
+  }
+  if (process.env.DEFAULT_APP_PORT) {
+    const val = parseInt(process.env.DEFAULT_APP_PORT, 10);
+    if (!isNaN(val)) return val;
+  }
+  if (process.env.APP_PORT) {
+    const val = parseInt(process.env.APP_PORT, 10);
+    if (!isNaN(val)) return val;
+  }
+  if (process.env.PORT && process.env.PORT !== '8080') {
+    const val = parseInt(process.env.PORT, 10);
+    if (!isNaN(val)) return val;
+  }
+  return 3000;
+}
+
+const PORT = getListenPort();
 
 async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production' || !fs.existsSync(path.resolve(__dirname, 'server.ts'));
@@ -598,8 +619,35 @@ async function startServer() {
     });
   }
 
-  app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`Server listening on http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[TeleHost] Server listening on http://0.0.0.0:${PORT}`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[TeleHost] Port ${PORT} already in use.`);
+      // If port 8080 was attempted (e.g. from PORT env), fallback to 3000
+      if (PORT === 8080) {
+        console.log('[TeleHost] Retrying on port 3000...');
+        const fallbackServer = app.listen(3000, '0.0.0.0', () => {
+          console.log('[TeleHost] Server listening on http://0.0.0.0:3000');
+        });
+        fallbackServer.on('error', (fallbackErr: any) => {
+          if (fallbackErr.code === 'EADDRINUSE') {
+            console.log('[TeleHost] Existing server is already running and active on port 3000.');
+          } else {
+            console.error('[TeleHost] Server error on port 3000:', fallbackErr);
+            process.exit(1);
+          }
+        });
+        return;
+      }
+      // If port 3000 is already active in dev, do not crash fatal with exit code 1
+      console.log(`[TeleHost] Existing server is already running and active on port ${PORT}.`);
+    } else {
+      console.error('[TeleHost] Fatal server error:', err);
+      process.exit(1);
+    }
   });
 }
 
