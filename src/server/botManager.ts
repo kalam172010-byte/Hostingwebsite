@@ -278,8 +278,29 @@ export function saveManifests() {
   }
 }
 
+export function bootstrapPythonEnvironment(): void {
+  try {
+    const getPipPath = path.resolve(process.cwd(), 'get-pip.py');
+    const reqPath = path.resolve(process.cwd(), 'requirements.txt');
+
+    // 1. Ensure pip exists
+    const checkPip = spawnSync('python3', ['-m', 'pip', '--version']);
+    if (checkPip.status !== 0 && fs.existsSync(getPipPath)) {
+      spawnSync('python3', [getPipPath, '--break-system-packages', '--no-warn-script-location'], { timeout: 60000 });
+    }
+
+    // 2. Ensure core python requirements are installed on Render / Cloud boot
+    if (fs.existsSync(reqPath)) {
+      spawnSync('python3', ['-m', 'pip', 'install', '--break-system-packages', '--quiet', '-r', reqPath], { timeout: 90000 });
+    }
+  } catch (_) {}
+}
+
 export function loadManifests() {
   try {
+    // Run automated python runtime check for Render and cloud hosting
+    bootstrapPythonEnvironment();
+
     // Ensure pybot_ff_selling_bot directory has the script and database
     const ffBotDir = path.join(hostedPythonBotsDir, 'pybot_ff_selling_bot');
     if (!fs.existsSync(ffBotDir)) {
@@ -369,6 +390,15 @@ export function loadManifests() {
         }
       } catch (_) {}
     }
+    // 24/7 ACTIVE WATCHDOG: Checks every 15s and revives any dead Python bot worker automatically
+    setInterval(() => {
+      hostedPythonBots.forEach(b => {
+        if (b.status === 'RUNNING' && !runningProcesses.has(b.id) && !pendingRestartTimeouts.has(b.id)) {
+          console.log(`[24/7 Watchdog] Reviving inactive Python bot "${b.name}" (${b.id})...`);
+          spawnPythonBotProcess(b);
+        }
+      });
+    }, 15000);
   } catch (err) {
     console.error('[Manifest Load Error]', err);
   }
@@ -787,6 +817,17 @@ CRITICAL RULES:
 }
 
 export function autoInstallMissingModulesFromCode(code: string, botLogs?: string[]): void {
+  // Ensure pip is available
+  try {
+    const checkPip = spawnSync('python3', ['-m', 'pip', '--version']);
+    if (checkPip.status !== 0) {
+      const getPipPath = path.resolve(process.cwd(), 'get-pip.py');
+      if (fs.existsSync(getPipPath)) {
+        spawnSync('python3', [getPipPath, '--break-system-packages', '--no-warn-script-location'], { timeout: 45000 });
+      }
+    }
+  } catch (_) {}
+
   const importLines = code.match(/^(?:from\s+([a-zA-Z0-9_]+)|import\s+([a-zA-Z0-9_]+))/gm) || [];
   const standardLibs = new Set([
     'os', 'sys', 'json', 'time', 'datetime', 'math', 'random', 're', 'asyncio',
@@ -1184,7 +1225,8 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
     const activeMasterToken = Array.from(activeBots.values())[0]?.info?.token || "8632912098:AAENMDr-tkYBDsgl5MkA8SAt_3qOgnpL8j8";
     const env = {
       ...process.env,
-      PATH: `/root/.local/bin:${process.env.PATH || ''}:/usr/local/bin:/usr/bin:/bin`,
+      PATH: `/opt/render/project/src/.venv/bin:/home/render/.local/bin:/root/.local/bin:${process.env.PATH || ''}:/usr/local/bin:/usr/bin:/bin`,
+      PYTHONPATH: `${botDir}:${process.cwd()}:${process.env.PYTHONPATH || ''}`,
       PYTHONUNBUFFERED: '1',
       PYTHONIOENCODING: 'UTF-8',
       BOT_ID: botInfo.id,
@@ -1269,25 +1311,24 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
         await notifyUserOfBotError(botInfo, runStderr);
       }
 
-      // If consecutive crashes exceed 10, stop loop and alert user
-      if ((botInfo.consecutiveCrashCount || 0) >= 10) {
-        botInfo.status = 'ERROR';
-        botInfo.autoRestartEnabled = false;
-        botInfo.logs.push(`[SUPERVISOR] ⚠️ Halted auto-restart after 10 consecutive crashes. Please inspect logs, fix the code, or click Restart.`);
-        return;
+      // If repeated crashes, backoff delay gracefully up to 30s but NEVER permanently kill the worker
+      if ((botInfo.consecutiveCrashCount || 0) >= 12) {
+        botInfo.logs.push(`[SUPERVISOR] ⚠️ Frequent restarts detected. Backing off restart interval to 30s to allow network stabilization...`);
       }
 
       // 24/7 AUTO-RESTART SUPERVISOR:
-      // If the bot was NOT explicitly stopped by the user, automatically restart it with backoff
-      if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED' && botInfo.status !== 'ERROR') {
+      // Always automatically restart any running bot worker with intelligent backoff
+      if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED') {
         botInfo.status = 'RUNNING';
         botInfo.restartCount = (botInfo.restartCount || 0) + 1;
         
         // Calculate backoff: if repeated rapid crashes, increase delay up to 30s
         const crashCount = botInfo.consecutiveCrashCount || 0;
         let delayMs = 2000;
-        if (crashCount > 6) {
-          delayMs = Math.min(30000, 5000 + (crashCount - 6) * 5000);
+        if (crashCount > 10) {
+          delayMs = 30000;
+        } else if (crashCount > 5) {
+          delayMs = 10000;
         } else if (crashCount > 2) {
           delayMs = 4000;
         }
@@ -1297,7 +1338,7 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
         
         const restartTimer = setTimeout(() => {
           pendingRestartTimeouts.delete(botInfo.id);
-          if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED' && botInfo.status !== 'ERROR' && !runningProcesses.has(botInfo.id)) {
+          if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED' && !runningProcesses.has(botInfo.id)) {
             spawnPythonBotProcess(botInfo);
           }
         }, delayMs);

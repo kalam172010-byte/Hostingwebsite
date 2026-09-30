@@ -3,10 +3,12 @@ services:
     name: telehost-telethon-studio
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm install && (python3 get-pip.py --break-system-packages || true) && (python3 -m pip install --break-system-packages -r requirements.txt || true) && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
         value: 20
       - key: NODE_ENV
         value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"
