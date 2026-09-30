@@ -20,8 +20,8 @@ COPY . .
 # Install Python dependencies safely
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt 2>/dev/null || pip3 install --no-cache-dir -r requirements.txt || true
 
-# Install Node dependencies cleanly without lifecycle script conflicts
-RUN npm install --ignore-scripts --no-audit --no-fund
+# Install Node dependencies cleanly with legacy-peer-deps
+RUN npm install --legacy-peer-deps --ignore-scripts --no-audit --no-fund
 
 # Run production build
 RUN npm run build
