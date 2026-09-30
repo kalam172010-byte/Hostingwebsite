@@ -28,6 +28,7 @@ import {
 interface HostedPythonBotsViewProps {
   bots: HostedPythonBot[];
   masterBots: HostedBot[];
+  submissions?: any[];
   onRefresh: () => void;
   onStartBot: (id: string) => Promise<void>;
   onStopBot: (id: string) => Promise<void>;
@@ -37,11 +38,15 @@ interface HostedPythonBotsViewProps {
   onDeployCode: (name: string, code: string) => Promise<void>;
   onConnectToken?: (token: string, name?: string) => Promise<{ success: boolean; username?: string; error?: string }>;
   onNavigateBack?: () => void;
+  onRunSubmission?: (submission: any) => Promise<void>;
+  onDeleteSubmission?: (id: string) => Promise<void>;
+  onClearAllSubmissions?: () => Promise<void>;
 }
 
 export const HostedPythonBotsView: React.FC<HostedPythonBotsViewProps> = ({
   bots,
   masterBots,
+  submissions = [],
   onRefresh,
   onStartBot,
   onStopBot,
@@ -50,7 +55,10 @@ export const HostedPythonBotsView: React.FC<HostedPythonBotsViewProps> = ({
   onUploadFile,
   onDeployCode,
   onConnectToken,
-  onNavigateBack
+  onNavigateBack,
+  onRunSubmission,
+  onDeleteSubmission,
+  onClearAllSubmissions
 }) => {
   const [selectedBotForLogs, setSelectedBotForLogs] = useState<HostedPythonBot | null>(null);
   const [selectedBotForEnv, setSelectedBotForEnv] = useState<HostedPythonBot | null>(null);
@@ -66,6 +74,86 @@ export const HostedPythonBotsView: React.FC<HostedPythonBotsViewProps> = ({
   const [tokenTestResult, setTokenTestResult] = useState<{ success: boolean; message: string; username?: string } | null>(null);
   const [showTroubleshooter, setShowTroubleshooter] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [runningSubmissionId, setRunningSubmissionId] = useState<string | null>(null);
+  const [isUploadingUserFile, setIsUploadingUserFile] = useState(false);
+  const userFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleDeleteSubmission = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this file from the server?')) return;
+    try {
+      if (onDeleteSubmission) {
+        await onDeleteSubmission(id);
+      }
+      await fetch(`/api/submissions/${id}`, { method: 'DELETE' });
+      onRefresh();
+    } catch (err) {
+      console.error('Delete submission error:', err);
+    }
+  };
+
+  const handleClearAllSubmissions = async () => {
+    if (!confirm('Are you sure you want to delete ALL received files?')) return;
+    try {
+      if (onClearAllSubmissions) {
+        await onClearAllSubmissions();
+      }
+      await fetch('/api/submissions', { method: 'DELETE' });
+      onRefresh();
+    } catch (err) {
+      console.error('Clear all submissions error:', err);
+    }
+  };
+
+  const handleUserFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingUserFile(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1];
+        await fetch('/api/submissions/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileName: file.name,
+            contentBase64: base64,
+            senderUsername: 'web_console',
+            description: `Uploaded from Web Console`
+          })
+        });
+        onRefresh();
+        setIsUploadingUserFile(false);
+        if (userFileInputRef.current) userFileInputRef.current.value = '';
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Direct file upload error:', err);
+      setIsUploadingUserFile(false);
+    }
+  };
+
+  const handleDownloadSubmission = (sub: any) => {
+    window.location.href = `/api/submissions/${sub.id}/download`;
+  };
+
+  const handleLaunchSubmission = async (sub: any) => {
+    if (onRunSubmission) {
+      await onRunSubmission(sub);
+      return;
+    }
+    try {
+      setRunningSubmissionId(sub.id);
+      const res = await fetch(`/api/submissions/${sub.id}/run`, { method: 'POST' });
+      if (res.ok) {
+        onRefresh();
+      }
+    } catch (err) {
+      console.error('Launch submission error:', err);
+    } finally {
+      setRunningSubmissionId(null);
+    }
+  };
 
   const handleDownloadBotFile = async (bot: HostedPythonBot) => {
     try {
@@ -678,9 +766,152 @@ while True:
                       </button>
 
                       <button
-                        onClick={() => onDeleteBot(bot.id)}
-                        className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition"
+                        onClick={async () => {
+                          if (confirm(`Are you sure you want to delete bot "${bot.name}"?`)) {
+                            await onDeleteBot(bot.id);
+                            onRefresh();
+                          }
+                        }}
+                        className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition cursor-pointer"
                         title="Delete Bot"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* User Received Files & Telegram Submissions Section */}
+      <div className="space-y-4 pt-4 border-t border-slate-800/80">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                <Upload className="w-4 h-4" />
+              </span>
+              <span>User Received Files & Telegram Submissions</span>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-cyan-950 text-cyan-400 border border-cyan-800">
+                {submissions.length} Files
+              </span>
+            </h2>
+            <p className="text-xs text-slate-400">
+              All scripts (.py), archives (.zip), and files sent by Telegram users or uploaded to TeleHost.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="file"
+              ref={userFileInputRef}
+              onChange={handleUserFileSelected}
+              className="hidden"
+              accept=".py,.zip,.html,.txt,.json,.tar,.gz"
+            />
+            <button
+              onClick={() => userFileInputRef.current?.click()}
+              disabled={isUploadingUserFile}
+              className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 shadow-sm"
+              title="Upload your own file (.py, .zip, etc.) directly"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>{isUploadingUserFile ? 'Uploading...' : 'Upload File'}</span>
+            </button>
+
+            {submissions.length > 0 && (
+              <button
+                onClick={handleClearAllSubmissions}
+                className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 hover:border-rose-500/30 transition text-xs flex items-center gap-1 cursor-pointer"
+                title="Clear all received files"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear All</span>
+              </button>
+            )}
+
+            <button
+              onClick={onRefresh}
+              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition text-xs flex items-center gap-1.5 cursor-pointer"
+              title="Refresh Files"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        {submissions.length === 0 ? (
+          <div className="p-8 text-center rounded-2xl bg-slate-900/60 border border-slate-800/80 text-slate-400 text-xs space-y-1">
+            <p className="font-semibold text-slate-300">No user files received yet</p>
+            <p>Send a <code>.py</code> file to your Telegram bot @AKASHFFPANEL11BOT or upload one above.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {submissions.map((sub: any) => {
+              const isRunningBot = bots.some(b => b.name === sub.fileName || b.originalFileName === sub.fileName || b.entryFile === sub.fileName);
+              return (
+                <div
+                  key={sub.id}
+                  className="p-4 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition flex flex-col justify-between gap-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">📄</span>
+                        <h4 className="font-bold text-white text-sm truncate font-mono" title={sub.fileName}>
+                          {sub.fileName}
+                        </h4>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-slate-400">
+                        <span>👤 @{sub.senderUsername || 'anonymous'}</span>
+                        <span>📊 {sub.fileSizeMB} MB</span>
+                        {sub.timestamp && <span>⏱️ {sub.timestamp}</span>}
+                      </div>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide uppercase shrink-0 border ${
+                        isRunningBot || sub.status === 'HOSTED'
+                          ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                          : 'bg-cyan-950 text-cyan-400 border-cyan-800'
+                      }`}
+                    >
+                      {isRunningBot || sub.status === 'HOSTED' ? '🟢 HOSTED' : (sub.status || 'RECEIVED')}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/60 text-xs">
+                    <span className="text-slate-400 text-[11px] truncate">
+                      {sub.reason || 'Auto-stored on server'}
+                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleDownloadSubmission(sub)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white border border-slate-700 transition font-medium text-xs cursor-pointer"
+                        title="Download file to computer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download</span>
+                      </button>
+
+                      {sub.fileName?.endsWith('.py') && (
+                        <button
+                          onClick={() => handleLaunchSubmission(sub)}
+                          disabled={runningSubmissionId === sub.id}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition cursor-pointer disabled:opacity-50"
+                          title="Run this Python bot 24/7"
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                          <span>{runningSubmissionId === sub.id ? 'Launching...' : 'Run 24/7'}</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => handleDeleteSubmission(sub.id)}
+                        className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 hover:border-rose-500/30 transition text-xs cursor-pointer"
+                        title="Delete file from server"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>

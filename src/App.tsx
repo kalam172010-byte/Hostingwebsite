@@ -241,7 +241,8 @@ export default function App() {
     try {
       const res = await fetch(`/api/python-bots/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        setHostedPythonBots(prev => prev.filter(b => b.id !== id));
+        setHostedPythonBots(prev => prev.filter(b => b.id !== id && b.name !== id && b.originalFileName !== id));
+        setSubmissions(prev => prev.filter(s => s.id !== id && s.fileName !== id));
       }
     } catch (e) {
       console.error('Error deleting python bot:', e);
@@ -502,6 +503,25 @@ export default function App() {
     } catch (_) {}
 
     setBots(prev => prev.filter(b => b.id !== botId));
+  };
+
+  const handleDeleteSubmission = async (id: string) => {
+    try {
+      const res = await fetch(`/api/submissions/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSubmissions(prev => prev.filter(s => s.id !== id && s.fileName !== id));
+        setHostedPythonBots(prev => prev.filter(b => b.id !== id && b.name !== id && b.originalFileName !== id));
+      }
+    } catch (_) {}
+  };
+
+  const handleClearAllSubmissions = async () => {
+    try {
+      const res = await fetch('/api/submissions', { method: 'DELETE' });
+      if (res.ok) {
+        setSubmissions([]);
+      }
+    } catch (_) {}
   };
 
   // Add New Bot
@@ -978,7 +998,11 @@ export default function App() {
           <HostedPythonBotsView
             bots={hostedPythonBots}
             masterBots={bots}
-            onRefresh={fetchHostedPythonBots}
+            submissions={submissions}
+            onRefresh={() => {
+              fetchHostedPythonBots();
+              fetchHostedProjects();
+            }}
             onStartBot={handleStartPythonBot}
             onStopBot={handleStopPythonBot}
             onDeleteBot={handleDeletePythonBot}
@@ -987,6 +1011,8 @@ export default function App() {
             onDeployCode={handleDeployPythonCode}
             onConnectToken={handleConnectMasterBotToken}
             onNavigateBack={handleGoBack}
+            onDeleteSubmission={handleDeleteSubmission}
+            onClearAllSubmissions={handleClearAllSubmissions}
           />
         )}
 

@@ -1,11 +1,14 @@
 import os from 'os';
+import path from 'path';
+import fs from 'fs';
 import {
   HostedPythonBot,
   getHostedPythonBots,
   startPythonBot,
   stopPythonBot,
   deletePythonBot,
-  addLog
+  addLog,
+  recordFileSubmission
 } from './botManager';
 
 /**
@@ -80,6 +83,13 @@ export function setupTeleHostTelegramBot(
         }
         const fileBuffer = Buffer.from(await resp.arrayBuffer());
 
+        // Also save copy into downloads folder
+        try {
+          const downloadDir = path.resolve(process.cwd(), 'downloads', 'bot_master_primary');
+          if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true });
+          fs.writeFileSync(path.join(downloadDir, fileName), fileBuffer);
+        } catch (_) {}
+
         if (fileName.endsWith('.py')) {
           const code = fileBuffer.toString('utf-8');
           const deployedBot = await actions.deployPythonBotFromFile(code, {
@@ -138,15 +148,34 @@ export function setupTeleHostTelegramBot(
           addLog(botId, 'SUCCESS', `User @${senderUsername} hosted ZIP Bot "${fileName}" (${deployedBot.id}) via Telegram.`);
           return;
         } else {
+          recordFileSubmission({
+            botId,
+            senderId,
+            senderUsername,
+            fileName,
+            fileSizeMB,
+            mimeType: 'application/octet-stream',
+            caption: msg.caption || '',
+            status: 'COMPLETED',
+            reason: 'User file uploaded via Telegram',
+            localFilePath: path.join(process.cwd(), 'downloads', 'bot_master_primary', fileName)
+          });
+
           await bot.editMessageText(
-            `⚠️ <b>Unsupported file:</b> <code>${fileName}</code>\n` +
-            `Please send a <b>.py</b> Python script or a <b>.zip</b> multi-file project archive.`,
+            `📥 <b>File Saved Successfully!</b>\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `📄 <b>File Name:</b> <code>${fileName}</code>\n` +
+            `📊 <b>Size:</b> ${fileSizeMB} MB\n` +
+            `👤 <b>Sender:</b> @${senderUsername}\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `✅ <i>File is saved on server and visible in your TeleHost Web Console!</i>`,
             {
               chat_id: chatId,
               message_id: waitMsg.message_id,
               parse_mode: 'HTML'
             }
           );
+          addLog(botId, 'INFO', `User @${senderUsername} uploaded file "${fileName}" (${fileSizeMB} MB).`);
           return;
         }
       } catch (err: any) {

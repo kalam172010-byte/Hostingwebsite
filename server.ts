@@ -30,7 +30,11 @@ import {
   getSystemStats,
   updatePythonBotEnv,
   getPythonBotScriptPath,
-  resetDailyUploadLimit
+  resetDailyUploadLimit,
+  deleteSubmission,
+  clearAllSubmissions,
+  recordFileSubmission,
+  wipeAllBotsAndSubmissions
 } from './src/server/botManager';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -273,8 +277,10 @@ app.post('/api/python-bots/:id/stop', (req, res) => {
 
 // Delete Python Bot
 app.delete('/api/python-bots/:id', (req, res) => {
-  const success = deletePythonBot(req.params.id);
-  res.json({ success });
+  const { id } = req.params;
+  const s1 = deletePythonBot(id);
+  const s2 = deleteSubmission(id);
+  res.json({ success: s1 || s2 });
 });
 
 // Update Python Bot Environment Variable
@@ -294,6 +300,123 @@ app.get('/api/python-bots/:id/download', (req, res) => {
     return res.status(404).json({ error: 'Bot file not found on server.' });
   }
   res.download(botInfo.filePath, botInfo.fileName);
+});
+
+// Download User File / Submission
+app.get('/api/submissions/:id/download', (req, res) => {
+  const submissions = getLiveSubmissions();
+  const sub = submissions.find(s => s.id === req.params.id);
+  if (!sub) {
+    return res.status(404).json({ error: 'File submission not found.' });
+  }
+  let targetPath = sub.localFilePath;
+  if (!targetPath || !fs.existsSync(targetPath)) {
+    const candidates = [
+      path.resolve(process.cwd(), 'downloads', 'bot_master_primary', sub.fileName),
+      path.resolve(process.cwd(), 'downloads', sub.fileName),
+      path.resolve(process.cwd(), 'downloads', 'bot_primary', sub.fileName)
+    ];
+    targetPath = candidates.find(c => fs.existsSync(c));
+  }
+  if (!targetPath || !fs.existsSync(targetPath)) {
+    return res.status(404).json({ error: 'File not found on disk.' });
+  }
+  res.download(targetPath, sub.fileName);
+});
+
+// Run a user submission as a 24/7 Python Bot Worker
+app.post('/api/submissions/:id/run', async (req, res) => {
+  try {
+    const submissions = getLiveSubmissions();
+    const sub = submissions.find(s => s.id === req.params.id);
+    if (!sub) return res.status(404).json({ error: 'Submission not found.' });
+
+    let targetPath = sub.localFilePath;
+    if (!targetPath || !fs.existsSync(targetPath)) {
+      const candidates = [
+        path.resolve(process.cwd(), 'downloads', 'bot_master_primary', sub.fileName),
+        path.resolve(process.cwd(), 'downloads', sub.fileName),
+        path.resolve(process.cwd(), 'downloads', 'bot_primary', sub.fileName)
+      ];
+      targetPath = candidates.find(c => fs.existsSync(c));
+    }
+
+    if (!targetPath || !fs.existsSync(targetPath)) {
+      return res.status(404).json({ error: 'Script file not found on disk.' });
+    }
+
+    const code = fs.readFileSync(targetPath, 'utf-8');
+    const bot = await deployPythonBotFromFile(code, {
+      name: sub.fileName,
+      originalFileName: sub.fileName,
+      senderUsername: sub.senderUsername,
+      senderId: sub.senderId,
+      sourceType: 'telegram_bot',
+      botId: sub.botId
+    });
+
+    sub.status = 'HOSTED';
+    sub.reason = 'Running as 24/7 Python Cloud Bot Worker';
+    res.json({ success: true, bot });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a specific user file submission
+app.delete('/api/submissions/:id', (req, res) => {
+  const { id } = req.params;
+  const s1 = deleteSubmission(id);
+  const s2 = deletePythonBot(id);
+  res.json({ success: s1 || s2 });
+});
+
+// Clear all submissions
+app.delete('/api/submissions', (_req, res) => {
+  const success = clearAllSubmissions();
+  res.json({ success });
+});
+
+// Direct file upload for User Files
+app.post('/api/submissions/upload', (req, res) => {
+  try {
+    const { fileName, contentBase64, senderUsername, description } = req.body;
+    if (!fileName || !contentBase64) {
+      return res.status(400).json({ error: 'Missing fileName or contentBase64' });
+    }
+    const buffer = Buffer.from(contentBase64, 'base64');
+    const downloadsDir = path.resolve(process.cwd(), 'downloads', 'bot_master_primary');
+    if (!fs.existsSync(downloadsDir)) fs.mkdirSync(downloadsDir, { recursive: true });
+    const targetPath = path.join(downloadsDir, fileName);
+    fs.writeFileSync(targetPath, buffer);
+
+    const sub = recordFileSubmission({
+      botId: 'bot_master_primary',
+      senderId: 1001,
+      senderUsername: senderUsername || 'web_user',
+      fileName,
+      fileSizeMB: Number((buffer.length / (1024 * 1024)).toFixed(3)),
+      mimeType: fileName.endsWith('.py') ? 'text/x-python' : (fileName.endsWith('.zip') ? 'application/zip' : 'application/octet-stream'),
+      caption: description || 'Uploaded via Web Console',
+      status: 'COMPLETED',
+      reason: 'Direct upload from Web Console',
+      localFilePath: targetPath
+    });
+
+    res.json({ success: true, submission: sub });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Wipe All Bots, Submissions & Temporary Files for Clean Slate
+app.post('/api/wipe-all', (_req, res) => {
+  try {
+    wipeAllBotsAndSubmissions();
+    res.json({ success: true, message: 'All bots, scripts, and files have been completely wiped clean.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ==============================================================================
@@ -792,7 +915,7 @@ Approval Rules: ${JSON.stringify(rules || {}, null, 2)}
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: userMessage,
       config: {
         systemInstruction,
@@ -804,8 +927,8 @@ Approval Rules: ${JSON.stringify(rules || {}, null, 2)}
       const data = JSON.parse(response.text.trim());
       return res.json(data);
     }
-  } catch (err: any) {
-    console.warn('[TeleHost AI Engine] AI request notice (using high-performance template fallback):', err?.message || err);
+  } catch (_) {
+    // Fallback gracefully without console noise
   }
 
   // Graceful deterministic fallback generator (ensures zero downtime even if AI quota is exhausted)
@@ -902,7 +1025,7 @@ app.post('/api/optimize-rules', async (req, res) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: `Analyze these file approval requirements for a Telethon Telegram bot: "${rulesDescription}".
 Suggest optimal structured approval rules.
 Return JSON in format:
@@ -926,8 +1049,8 @@ Return JSON in format:
       const data = JSON.parse(response.text.trim());
       return res.json(data);
     }
-  } catch (err: any) {
-    console.warn('[TeleHost AI Rules] AI request notice (using smart rule fallback):', err?.message || err);
+  } catch (_) {
+    // Fallback gracefully without console noise
   }
 
   // Fallback optimized rules
