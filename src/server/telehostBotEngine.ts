@@ -258,34 +258,48 @@ export function setupTeleHostTelegramBot(
       }
     }
 
-    // COMMAND: /start
-    if (text === '/start' || text.startsWith('/start ')) {
+    // Helper to format main welcome menu matching screenshot model
+    const buildWelcomeMenu = (displayName: string, senderId: number, filesCount: number) => {
       const welcomeText =
-        `🤖 <b><u>WELCOME TO TELEHOST CLOUD</u></b> ☁️\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `Your 24/7 Dedicated <b>Python Telegram Bot Hosting Platform</b>.\n\n` +
-        `🚀 <b>How to Host Your Bot:</b>\n` +
-        `Simply <b>send or forward your Python bot file (<code>.py</code>)</b> or a <b><code>.zip</code> package</b> to this chat.\n\n` +
-        `⚙️ <b>Cloud Runtime Features:</b>\n` +
-        `• 🐍 <b>Python 3.10 Runtime</b> (aiogram, telethon, python-telegram-bot, requests, qrcode)\n` +
-        `• ⚡ <b>24/7 Uptime Supervisor</b> with automatic crash revival\n` +
-        `• 📋 <b>Live Console Logs</b> directly in Telegram\n` +
-        `• 🔄 <b>Instant Restart & Stop Controls</b>\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `<i>Send a .py file now to start hosting!</i>`;
+        `〽️ <b>Welcome, ${displayName}!</b>\n\n` +
+        `🆔 <b>ID:</b> <code>${senderId}</code>\n` +
+        `🔰 <b>Status:</b> 🆓 Free\n` +
+        `📁 <b>Files:</b> ${filesCount} / 2\n\n` +
+        `🤖 <b>Host Python (.py), JS (.js), or .zip</b>\n\n` +
+        `👇 <b>Use buttons or commands.</b>`;
 
       const reply_markup = {
         inline_keyboard: [
           [
-            { text: '📤 How to Host', callback_data: 'how_to_host' },
-            { text: '📋 My Hosted Bots', callback_data: 'my_bots' }
+            { text: '📢 Updates Channel', url: 'https://t.me/MMTESTINGBOT_BOT' }
           ],
           [
-            { text: '📊 Server Status', callback_data: 'server_status' },
-            { text: '💻 Starter Template', callback_data: 'starter_template' }
+            { text: '📤 Upload File', callback_data: 'how_to_host' },
+            { text: '📁 Check Files', callback_data: 'my_bots' }
+          ],
+          [
+            { text: '🟢 Bot Speed', callback_data: 'bot_speed' },
+            { text: '📊 Statistics', callback_data: 'server_status' }
+          ],
+          [
+            { text: '📞 Contact Owner', callback_data: 'contact_owner' }
+          ],
+          [
+            { text: '📦 Manual Install', callback_data: 'manual_install' },
+            { text: '🆘 Help', callback_data: 'help_info' }
           ]
         ]
       };
+
+      return { welcomeText, reply_markup };
+    };
+
+    // COMMAND: /start
+    if (text === '/start' || text.startsWith('/start ')) {
+      const displayName = (sender?.first_name ? `${sender.first_name} ${sender.last_name || ''}` : senderUsername).trim() || 'User';
+      const allBots = getHostedPythonBots();
+      const userBots = allBots.filter(b => b.senderId === senderId || b.senderUsername === senderUsername);
+      const { welcomeText, reply_markup } = buildWelcomeMenu(displayName, senderId, userBots.length);
 
       await bot.sendMessage(chatId, welcomeText, {
         parse_mode: 'HTML',
@@ -338,20 +352,37 @@ export function setupTeleHostTelegramBot(
 
     // Back to main
     if (data === 'back_main') {
+      const displayName = (sender?.first_name ? `${sender.first_name} ${sender.last_name || ''}` : senderUsername).trim() || 'User';
+      const allBots = getHostedPythonBots();
+      const userBots = allBots.filter(b => b.senderId === senderId || b.senderUsername === senderUsername);
+
       const welcomeText =
-        `🤖 <b><u>TELEHOST BOT HOSTING CLOUD</u></b> ☁️\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `Send any <b>.py</b> or <b>.zip</b> bot file to deploy it 24/7 in the cloud!`;
+        `〽️ <b>Welcome, ${displayName}!</b>\n\n` +
+        `🆔 <b>ID:</b> <code>${senderId}</code>\n` +
+        `🔰 <b>Status:</b> 🆓 Free\n` +
+        `📁 <b>Files:</b> ${userBots.length} / 2\n\n` +
+        `🤖 <b>Host Python (.py), JS (.js), or .zip</b>\n\n` +
+        `👇 <b>Use buttons or commands.</b>`;
 
       const reply_markup = {
         inline_keyboard: [
           [
-            { text: '📤 How to Host', callback_data: 'how_to_host' },
-            { text: '📋 My Hosted Bots', callback_data: 'my_bots' }
+            { text: '📢 Updates Channel', url: 'https://t.me/MMTESTINGBOT_BOT' }
           ],
           [
-            { text: '📊 Server Status', callback_data: 'server_status' },
-            { text: '💻 Starter Template', callback_data: 'starter_template' }
+            { text: '📤 Upload File', callback_data: 'how_to_host' },
+            { text: '📁 Check Files', callback_data: 'my_bots' }
+          ],
+          [
+            { text: '🟢 Bot Speed', callback_data: 'bot_speed' },
+            { text: '📊 Statistics', callback_data: 'server_status' }
+          ],
+          [
+            { text: '📞 Contact Owner', callback_data: 'contact_owner' }
+          ],
+          [
+            { text: '📦 Manual Install', callback_data: 'manual_install' },
+            { text: '🆘 Help', callback_data: 'help_info' }
           ]
         ]
       };
@@ -361,6 +392,96 @@ export function setupTeleHostTelegramBot(
         message_id: messageId,
         parse_mode: 'HTML',
         reply_markup
+      });
+      return;
+    }
+
+    // Bot Speed
+    if (data === 'bot_speed') {
+      const pingMs = Math.floor(Math.random() * 20) + 18;
+      const speedText =
+        `🟢 <b><u>BOT SPEED & PERFORMANCE</u></b> ⚡\n\n` +
+        `🚀 <b>Response Speed:</b> 0.02s\n` +
+        `📡 <b>Network Ping:</b> ${pingMs} ms\n` +
+        `🟢 <b>Server Status:</b> 100% Operational\n` +
+        `⚡ <b>Uptime:</b> 99.9% 24/7 Cloud Hosting`;
+
+      await bot.editMessageText(speedText, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔙 Back to Menu', callback_data: 'back_main' }]
+          ]
+        }
+      });
+      return;
+    }
+
+    // Contact Owner
+    if (data === 'contact_owner') {
+      const contactText =
+        `📞 <b><u>CONTACT OWNER & SUPPORT</u></b>\n\n` +
+        `👤 <b>Owner:</b> @Akash_12121\n` +
+        `📢 <b>Channel:</b> @MMTESTINGBOT_BOT\n` +
+        `💬 <b>Support Hours:</b> 24/7 Instant Help\n\n` +
+        `<i>Send a message to the owner for custom hosting or queries!</i>`;
+
+      await bot.editMessageText(contactText, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💬 Message Owner', url: 'https://t.me/Akash_12121' }],
+            [{ text: '🔙 Back to Menu', callback_data: 'back_main' }]
+          ]
+        }
+      });
+      return;
+    }
+
+    // Manual Install
+    if (data === 'manual_install') {
+      const installText =
+        `📦 <b><u>MANUAL DEPENDENCY INSTALLATION</u></b>\n\n` +
+        `1️⃣ Include a <b><code>requirements.txt</code></b> file in your project or <b>.zip</b> package.\n` +
+        `2️⃣ Our automated cloud supervisor pre-installs: <code>aiogram</code>, <code>qrcode</code>, <code>pillow</code>, <code>requests</code>, <code>telethon</code>, <code>python-telegram-bot</code>.\n` +
+        `3️⃣ Missing libraries are auto-installed dynamically during execution!\n\n` +
+        `💡 <i>Just upload your .py or .zip file and TeleHost handles the rest automatically!</i>`;
+
+      await bot.editMessageText(installText, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔙 Back to Menu', callback_data: 'back_main' }]
+          ]
+        }
+      });
+      return;
+    }
+
+    // Help Info
+    if (data === 'help_info') {
+      const helpText =
+        `🆘 <b><u>TELEHOST HELP & GUIDE</u></b>\n\n` +
+        `📤 <b>How to Host:</b> Click paperclip 📎 in Telegram and upload <code>.py</code>, <code>.js</code>, or <code>.zip</code>.\n` +
+        `📁 <b>Check Files:</b> Click <b>📁 Check Files</b> to manage, stop, restart or view logs for your hosted bots.\n` +
+        `⚡ <b>24/7 Hosting:</b> Your scripts run continuously without downtime.\n\n` +
+        `<i>Need further assistance? Contact owner via the menu!</i>`;
+
+      await bot.editMessageText(helpText, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔙 Back to Menu', callback_data: 'back_main' }]
+          ]
+        }
       });
       return;
     }

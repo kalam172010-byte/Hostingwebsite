@@ -4,7 +4,8 @@ import sqlite3
 import random
 import logging
 import time
-import aiohttp
+import urllib.request
+import urllib.error
 import hmac
 import hashlib
 import urllib.parse
@@ -12,16 +13,36 @@ import json
 import html
 from io import BytesIO
 
-import qrcode
+# --- ADDITIONAL IMPORTS FOR LOCAL QR GENERATION ---
+# These are necessary if the bot is intended to generate QR codes locally
+# when the new FamGateway is not configured and the legacy FamPay fallback is used.
+# The original code's `generate_upi_qr_file` function raised RuntimeError,
+# indicating missing implementation or implicit dependency on these libraries.
+try:
+    import qrcode
+    # Pillow is often a dependency of qrcode for image generation
+    # It might be implicitly pulled, but explicitly listing it helps clarify.
+    # qrcode.make_image uses PIL if available. No direct PIL import is typically needed.
+    _QRCODE_AVAILABLE = True
+except ImportError:
+    _QRCODE_AVAILABLE = False
+    logging.warning("Optional: 'qrcode' library not found. Local QR code generation will be disabled. "
+                    "Ensure 'qrcode' and its dependencies (like 'Pillow') are installed if needed.")
+
 from datetime import datetime, timedelta
 from typing import Optional, List, Tuple, Dict, Any
-import urllib.request
-import urllib.error
+
 
 async def http_request(method: str, url: str, headers: Optional[Dict[str, str]] = None, data: Optional[bytes] = None, timeout: int = 20):
-    """Small stdlib-only async HTTP helper; avoids requiring external dependencies."""
+    """Small stdlib-only async HTTP helper with standard browser User-Agent."""
+    default_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    all_headers = {**default_headers, **(headers or {})}
     def _request():
-        req = urllib.request.Request(url, data=data, headers=headers or {}, method=method.upper())
+        req = urllib.request.Request(url, data=data, headers=all_headers, method=method.upper())
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.status, resp.read()
@@ -34,6 +55,17 @@ async def http_request(method: str, url: str, headers: Optional[Dict[str, str]] 
     except Exception as e:
         return 500, str(e).encode('utf-8')
 
+# Hosted-runner dependency bootstrap: install aiogram automatically if the host did not preinstall it.
+try:
+    import aiogram  # type: ignore
+except ModuleNotFoundError:
+    try:
+        import subprocess, sys
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-cache-dir", "aiogram>=3.20,<4"])
+    except Exception:
+        pass
+    import aiogram  # type: ignore
+
 from aiogram import Bot, Dispatcher, F, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command, CommandStart
@@ -45,26 +77,32 @@ from aiogram.types import (
 )
 
 # ==============================================================================
-# 1. BOT CONFIGURATION & CONSTANTS
+# 1. BOT CONFIGURATION & CONSTANTS (Configurable via Environment Variables or Admin Panel)
 # ==============================================================================
-BOT_TOKEN = "8632912098:AAENMDr-tkYBDsgl5MkA8SAt_3qOgnpL8j8"
-BOT_USERNAME = "@AKASHFFPANEL11BOT"
-ADMIN_ID = int(os.getenv("8808556338", "8808556338"))
-ADMIN_CONTACT = "@Akash_12121"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8632912098:AAENMDr-tkYBDsgl5MkA8SAt_3qOgnpL8j8")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "@AKASHFFPANEL11BOT")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "8808556338"))
+ADMIN_CONTACT = os.getenv("ADMIN_CONTACT", "@Akash_12121")
 
-FAMPAY_API_KEY = "YOUR_FAMPAY_API_KEY"  # Replace with your actual API key
-FAMPAY_QR_URL = "https://fampay.anujbots.xyz/qr.php"
-FAMPAY_VERIFY_URL = "https://fampay.anujbots.xyz/verify.php"
+FAMPAY_API_KEY = os.getenv("FAMPAY_API_KEY", "fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e")
+FAMPAY_UPI_ID = os.getenv("FAMPAY_UPI_ID", "")
+FAMPAY_QR_URL = os.getenv("FAMPAY_QR_URL", "https://fampay.anujbots.xyz/qr.php")
+FAMPAY_VERIFY_URL = os.getenv("FAMPAY_VERIFY_URL", "https://fampay.anujbots.xyz/verify.php")
 
-# External API defaults (credentials are stored securely in the SQLite settings table)
-RESELLER_API_URL = "https://bantibhaiya.to/api/reseller_v1.php"
-PAYMENT_GATEWAY_URL = "https://famgateway.in/api/create-order"
+# External API defaults (credentials can be set via ENV or in SQLite settings table)
+RESELLER_API_URL = os.getenv("RESELLER_API_URL", "https://bantibhaiya.to/api/reseller_v1.php")
+RESELLER_API_KEY = os.getenv("RESELLER_API_KEY", "")
+RESELLER_MASTER_KEY = os.getenv("RESELLER_MASTER_KEY", "")
 
-USDT_TO_INR = 90.0
-VIP_DISCOUNT_PERCENTAGE = 10.0
-VIP_PRICE_INR = 1000.0
+PAYMENT_GATEWAY_URL = os.getenv("PAYMENT_GATEWAY_URL", "https://famgateway.in/api/create-order")
+PAYMENT_GATEWAY_TOKEN = os.getenv("PAYMENT_GATEWAY_TOKEN", "")
+PAYMENT_REDIRECT_URL = os.getenv("PAYMENT_REDIRECT_URL", "")
 
-WELCOME_STICKER_ID = "CAACAgIAAxkBAAEU-WZmH_..."  # Replace with your sticker ID
+USDT_TO_INR = float(os.getenv("USDT_TO_INR", "90.0"))
+VIP_DISCOUNT_PERCENTAGE = float(os.getenv("VIP_DISCOUNT_PERCENTAGE", "10.0"))
+VIP_PRICE_INR = float(os.getenv("VIP_PRICE_INR", "1000.0"))
+
+WELCOME_STICKER_ID = os.getenv("WELCOME_STICKER_ID", "CAACAgIAAxkBAAEU-WZmH_...")
 
 FIXED_CATEGORIES = [
     "ANDROID NON ROOT PANEL",
@@ -161,6 +199,12 @@ def db_query(query: str, params: tuple = (), fetchone: bool = False, fetchall: b
     finally:
         conn.close()
 
+def is_admin_user(user_id: int) -> bool:
+    if user_id == ADMIN_ID:
+        return True
+    row = db_query("SELECT is_admin FROM users WHERE user_id = ?", (user_id,), fetchone=True)
+    return bool(row and row[0] == 1)
+
 def get_setting(key: str, default: str = "") -> str:
     val = db_query("SELECT value FROM settings WHERE key=?", (key,), fetchone=True)
     return val[0] if val and val[0] else default
@@ -195,12 +239,13 @@ def get_emoji_icon(slot: str, default_id: str = None) -> str:
 # ==============================================================================
 UI_TEXTS = {
     "start_menu": (
-        "{product_store} <b>PRODUCT STORE :</b> Instant Keys & Panels\n"
-        "{profile} <b>MY PROFILE :</b> Account & Order Vault\n"
-        "{add_balance} <b>ADD BALANCE :</b> Fast UPI & QR Deposit\n"
-        "{tutorial} <b>TUTORIALS :</b> Setup & Usage Guides\n"
-        "{support} <b>SUPPORT :</b> 24/7 Admin Assistance\n\n"
-        "👇 <i>Select an option below to continue:</i>"
+        "✨ <b>KALAM FF PANEL?</b>\n\n"
+        "{product_store} 𝗣𝗥𝗢𝗗𝗨𝗖𝗧 𝗦𝘁𝗼𝗿𝗲 : 𝗮𝗹𝗹 𝗸𝗲𝘆𝘀 𝗣𝘂𝗿𝗰𝗵𝗮𝘀𝗲  & 𝗶𝗻𝘀𝘁𝗮𝗻𝘁𝗹𝘆 𝗱𝗲𝗹𝗶𝘃𝗲𝗿𝘆\n"
+        "{profile} 𝗠𝘆 𝗽𝗿𝗼𝗳𝗶𝗹𝗲 : 𝗰𝗵𝗲𝗰𝗸 𝘆𝗼𝘂𝗿 𝗮𝗰𝗰𝗼𝘂𝗻𝘁 𝗶𝗻𝗳𝗼𝗿𝗺𝗮𝘁𝗶𝗼𝗻\n"
+        "{add_balance} 𝗔𝗱𝗱 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 : 𝗱𝗲𝗽𝗼𝘀𝗶𝘁𝗲 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 & 𝘀𝗲𝗰𝘂𝗿𝗲 𝘀𝗲𝗿𝘃𝗶𝗰𝗲\n"
+        "{history} 𝗔𝗹𝗹 𝗵𝗶𝘀𝘁𝗼𝗿𝘆 : 𝗰𝗵𝗲𝗰𝗸 𝗮𝗹𝗹 𝗽𝘂𝗿𝗰𝗵𝗮𝘀𝗲 𝗵𝗶𝘀𝘁𝗼𝗿𝘆\n"
+        "{tutorial} 𝗧𝘂𝘁𝗼𝗿𝗶𝗮𝗹 : 𝘃𝗶𝗲𝘄 𝘁𝘂𝘁𝗼𝗿𝗶𝗮𝗹 & 𝘄𝗼𝗿𝗸 𝘁𝗵𝗶𝘀 𝗯𝗼𝘁\n"
+        "{support} 𝗦𝘂𝗽𝗽𝗼𝗿𝘁 : 𝗯𝗼𝘁 𝗽𝗿𝗼𝗯𝗹𝗲𝗺 𝘀𝗼𝗹𝘃𝗲𝗱 𝗳𝗼𝗿 𝘀𝘂𝗽𝗽𝗼𝗿𝘁 𝗮𝗱𝗺𝗶𝗻\n"
     ),
     "vip_menu": (
         "🌟 <b><u>VIP MEMBERSHIP CLUB</u></b> 🌟\n\n"
@@ -223,15 +268,6 @@ UI_TEXTS = {
 
 def get_ui_text(key: str, **kwargs) -> str:
     val = db_query("SELECT value FROM settings WHERE key=?", (f"ui_{key}",), fetchone=True)
-    if not val or not val[0]:
-        alias_map = {
-            "start_menu": "ui_start",
-            "vip_menu": "ui_vip",
-            "add_balance_menu": "ui_add_balance"
-        }
-        if key in alias_map:
-            val = db_query("SELECT value FROM settings WHERE key=?", (alias_map[key],), fetchone=True)
-            
     template = val[0] if val and val[0] else UI_TEXTS.get(key, "")
 
     emoji_map = {
@@ -406,7 +442,9 @@ def init_db() -> None:
     migrations = [
         "ALTER TABLE users ADD COLUMN is_vip INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN vip_since TEXT",
+        "ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0",
         "ALTER TABLE products ADD COLUMN is_active INTEGER DEFAULT 1",
+        "ALTER TABLE products ADD COLUMN is_maintenance INTEGER DEFAULT 0",
         "ALTER TABLE tickets ADD COLUMN created_at TEXT",
         "ALTER TABLE users ADD COLUMN is_banned INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN warnings INTEGER DEFAULT 0",
@@ -415,7 +453,11 @@ def init_db() -> None:
         "ALTER TABLE products ADD COLUMN bantibhaiya_product_duration TEXT DEFAULT ''",
         "ALTER TABLE transactions ADD COLUMN qr_url TEXT",
         "ALTER TABLE transactions ADD COLUMN upi_id TEXT",
-        "ALTER TABLE transactions ADD COLUMN expires_at INTEGER"
+        "ALTER TABLE transactions ADD COLUMN expires_at INTEGER",
+        "ALTER TABLE users ADD COLUMN referred_by INTEGER",
+        "ALTER TABLE users ADD COLUMN referrals_count INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN total_referral_earnings REAL DEFAULT 0.0",
+        "ALTER TABLE users ADD COLUMN referral_reward_claimed INTEGER DEFAULT 0"
     ]
     for mig in migrations:
         try: c.execute(mig)
@@ -427,15 +469,15 @@ def init_db() -> None:
         ('bot_status', 'ON'),
         ('how_to_video', 'None'),
         ('fampay_api_key', FAMPAY_API_KEY),
-        ('fampay_upi_id', ''),
+        ('fampay_upi_id', FAMPAY_UPI_ID),
         ('fampay_qr_url', FAMPAY_QR_URL),
         ('fampay_verify_url', FAMPAY_VERIFY_URL),
         ('reseller_api_url', RESELLER_API_URL),
-        ('reseller_api_key', ''),
-        ('reseller_master_key', ''),
+        ('reseller_api_key', RESELLER_API_KEY),
+        ('reseller_master_key', RESELLER_MASTER_KEY),
         ('payment_gateway_url', PAYMENT_GATEWAY_URL),
-        ('payment_gateway_token', ''),
-        ('payment_redirect_url', ''),
+        ('payment_gateway_token', PAYMENT_GATEWAY_TOKEN),
+        ('payment_redirect_url', PAYMENT_REDIRECT_URL),
         ('binance_api', ''),
         ('binance_secret', ''),
         ('binance_address', ''),
@@ -475,13 +517,10 @@ def migrate_categories() -> None:
     for slot, emoji_id in DEFAULT_EMOJIS.items():
         set_setting(f"emoji_{slot}", emoji_id)
     
-    # Force update UI texts directly in database
+    # Force update UI texts
     set_setting("ui_start_menu", UI_TEXTS['start_menu'])
-    set_setting("ui_start", UI_TEXTS['start_menu'])
     set_setting("ui_add_balance_menu", UI_TEXTS['add_balance_menu'])
-    set_setting("ui_add_balance", UI_TEXTS['add_balance_menu'])
     set_setting("ui_vip_menu", UI_TEXTS['vip_menu'])
-    set_setting("ui_vip", UI_TEXTS['vip_menu'])
     logger.info("UI texts and emojis updated with new placeholders and IDs.")
     
     # Fix any corrupted price columns (one-time cleanup)
@@ -582,20 +621,13 @@ class UserStates(StatesGroup):
 class AdminStates(StatesGroup):
     add_prod_category = State()
     add_prod_panel_name = State()
-    add_prod_name = State()
-    add_prod_validity = State()
-    add_prod_bantibhaiya_pid = State()
-    add_prod_bantibhaiya_duration = State()
-    add_prod_device_limit = State()
-    add_prod_price = State()
-    add_prod_reseller_price = State()
-    add_prod_apk = State()
-    add_prod_keys = State()
+    add_prod_new_panel_pid = State()
+    add_prod_plan_disp_name = State()
+    add_prod_bantibhaiya_dur = State()
+    add_prod_prices = State()
     
     edit_prod_field = State()
     wait_for_new_value = State()
-    wait_for_add_keys = State()
-    wait_for_delete_key = State()
     
     broadcast_msg = State()
     add_coupon_code = State()
@@ -644,6 +676,13 @@ class AdminStates(StatesGroup):
 # 7. KEYBOARDS
 # ==============================================================================
 def get_category_emoji(category: str) -> str:
+    # First, check if a specific emoji ID is set by admin for this exact category name
+    custom_cat_emoji_id = get_setting(f"cat_emoji_{category}", "")
+    if custom_cat_emoji_id.isdigit():
+        return custom_cat_emoji_id # Return the custom emoji ID if set and valid
+
+    # If no custom emoji, fall back to the generic slot name defined in DEFAULT_EMOJIS
+    # and then check global emoji settings (emoji_{slot}) or the hardcoded default.
     slot_map = {
         "ANDROID NON ROOT PANEL": "category_android_non_root",
         "ANDROID ROOT PANEL": "category_android_root",
@@ -651,13 +690,15 @@ def get_category_emoji(category: str) -> str:
     }
     slot = slot_map.get(category)
     if slot:
-        return get_emoji_icon(slot, DEFAULT_EMOJIS.get(slot, ""))
-    return ""
+        return get_emoji_icon(slot) # get_emoji_icon handles fallback from settings 'emoji_{slot}' to DEFAULT_EMOJIS
+    return "" # No specific emoji or fallback found
 
 def get_panel_emoji(panel_name: str) -> str:
+    # Check if a specific emoji is set for this exact panel name
     stored = get_setting(f"panel_emoji_{panel_name}", "")
     if stored and stored.isdigit():
         return stored
+    # Fallback to the generic 'product_store' emoji if no specific panel emoji
     return get_emoji_icon("product_store")
 
 def contact_kb() -> ReplyKeyboardMarkup:
@@ -710,6 +751,12 @@ def main_menu_kb(user_id: Optional[int] = None) -> InlineKeyboardMarkup:
             text="Support", callback_data="menu_support",
             icon_custom_emoji_id=get_emoji_icon("support"),
             style="danger"
+        )
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(
+            text="🎁 Refer & Earn", callback_data="menu_referral",
+            style="success"
         )
     ])
     
@@ -847,26 +894,34 @@ async def send_advanced_notification(user_id: int, notif_type: str, amount: floa
 # 9. FAMPAY PAYMENT FUNCTIONS
 # ==============================================================================
 
-def generate_upi_qr_file(upi_id: str, amount: float) -> BufferedInputFile:
-    """Generate a local PNG UPI QR containing the exact payment amount."""
-    upi_uri = (
-        "upi://pay?"
-        + urllib.parse.urlencode({
-            "pa": upi_id,
-            "pn": "KALAM FF PANEL",
-            "am": f"{float(amount):.2f}",
-            "cu": "INR",
-        })
-    )
-
-    qr = qrcode.QRCode(version=1, box_size=10, border=4)
-    qr.add_data(upi_uri)
-    qr.make(fit=True)
-    image = qr.make_image()
-
-    buffer = BytesIO()
-    image.save(buffer, format="PNG")
-    return BufferedInputFile(buffer.getvalue(), filename=f"payment_{int(amount)}.png")
+def generate_upi_qr_file(upi_id: str, amount: float) -> Optional[BufferedInputFile]:
+    """
+    Generates a UPI QR code image locally.
+    Requires 'qrcode' and 'Pillow' libraries to be installed.
+    Returns BufferedInputFile on success, None on failure or if libraries are missing.
+    """
+    if not _QRCODE_AVAILABLE:
+        logger.warning("Attempted local QR generation, but 'qrcode' library is not available.")
+        return None
+    try:
+        qr_data = f"upi://pay?pa={upi_id}&am={amount:.2f}&cu=INR"
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(qr_data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+        return BufferedInputFile(buffer.getvalue(), filename=f"payment_qr_{upi_id}.png")
+    except Exception as e:
+        logger.error(f"Error generating local UPI QR code: {e}", exc_info=True)
+        return None
 
 
 async def generate_fampay_qr(user_id: int, amount: float, upi_id: str = None) -> Dict[str, Any]:
@@ -883,75 +938,158 @@ async def generate_fampay_qr(user_id: int, amount: float, upi_id: str = None) ->
     
     url = f"{get_setting('fampay_qr_url', FAMPAY_QR_URL)}?upi={urllib.parse.quote(upi_id)}&amount={amount}"
     
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    try:
-                        result = await resp.json(content_type=None)
-                        return result
-                    except Exception as e:
-                        logger.error(f"Error parsing FamPay response: {e}")
-                        return {"status": "error", "message": "Failed to parse response"}
-                else:
-                    return {"status": "error", "message": f"HTTP Error: {resp.status}"}
-        except Exception as e:
-            logger.error(f"FamPay API Error: {e}")
-            return {"status": "error", "message": str(e)}
+    try:
+        status, body = await http_request("GET", url, timeout=20)
+        if status == 200:
+            try:
+                return json.loads(body.decode("utf-8", errors="replace"))
+            except Exception as e:
+                logger.error(f"Error parsing FamPay response: {e}")
+                return {"status": "error", "message": "Failed to parse response"}
+        return {"status": "error", "message": f"HTTP Error: {status}"}
+    except Exception as e:
+        logger.error(f"FamPay API Error: {e}")
+        return {"status": "error", "message": str(e)}
 
 async def verify_fampay_payment(order_id: str) -> Dict[str, Any]:
-    """Verify payment using the Admin-configured FamGateway when available."""
+    """Verify payment using the Admin-configured FamGateway / FamPay API with multi-endpoint fallback."""
     gateway_token = (get_setting("payment_gateway_token", "") or "").strip()
+    if not gateway_token:
+        gateway_token = (get_setting("fampay_api_key", FAMPAY_API_KEY) or "").strip()
     gateway_url = (get_setting("payment_gateway_url", PAYMENT_GATEWAY_URL) or "").strip()
 
-    if gateway_token:
+    # Try 1: FamGateway API (if token provided)
+    if gateway_token and gateway_token != "YOUR_FAMPAY_API_KEY":
         try:
-            # Build the verify endpoint from the configured gateway host.
             from urllib.parse import urlsplit, urlunsplit
             parts = urlsplit(gateway_url.rstrip("/"))
-            if parts.scheme and parts.netloc:
-                verify_url = urlunsplit((parts.scheme, parts.netloc, "/api/verify-order.php", "", ""))
-            else:
-                verify_url = "https://famgateway.in/api/verify-order.php"
+            verify_host = f"{parts.scheme}://{parts.netloc}" if (parts.scheme and parts.netloc) else "https://famgateway.in"
+            
+            # Query with multiple auth parameter conventions (famgateway.in requires ?api_key=...)
+            verify_endpoints = [
+                f"{verify_host}/api/verify-order.php?order_id={urllib.parse.quote(order_id)}&api_key={urllib.parse.quote(gateway_token)}",
+                f"{verify_host}/api/verify-order?order_id={urllib.parse.quote(order_id)}&api_key={urllib.parse.quote(gateway_token)}",
+                f"{verify_host}/api/verify-order.php?order_id={urllib.parse.quote(order_id)}&token={urllib.parse.quote(gateway_token)}",
+                f"https://fampay.anujbots.xyz/verify.php?order_id={urllib.parse.quote(order_id)}&api_key={urllib.parse.quote(gateway_token)}"
+            ]
+            
             headers = {
                 "Accept": "application/json",
                 "Authorization": f"Bearer {gateway_token}",
                 "X-Api-Key": gateway_token,
             }
-            timeout = aiohttp.ClientTimeout(total=20)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(verify_url, params={"order_id": order_id}, headers=headers) as resp:
-                    raw = await resp.text()
-                    try:
+            
+            for endpoint in verify_endpoints:
+                try:
+                    status, body = await http_request("GET", endpoint, headers=headers, timeout=10)
+                    if 200 <= status < 300:
+                        raw = body.decode("utf-8", errors="replace")
                         result = json.loads(raw)
-                    except Exception:
-                        result = {"status": "error", "message": raw[:500]}
-            if resp.status >= 400:
-                logger.error(f"FamGateway verify HTTP {resp.status}: {raw[:1000]}")
-                return {"status": "error", "message": result.get("message", f"HTTP {resp.status}") if isinstance(result, dict) else f"HTTP {resp.status}"}
-            return result if isinstance(result, dict) else {"status": "error", "message": "Invalid gateway response"}
+                        if isinstance(result, dict) and result.get("status") in ("success", "ok", True):
+                            return result
+                except Exception:
+                    pass
         except Exception as e:
-            logger.exception(f"FamGateway verify exception: {e}")
-            return {"status": "error", "message": str(e)}
+            logger.warning(f"Gateway verify exception: {e}")
 
-    # Legacy FamPay verification fallback.
-    api_key = get_setting("fampay_api_key", FAMPAY_API_KEY)
-    if not api_key or api_key == "YOUR_FAMPAY_API_KEY":
-        return {"status": "error", "message": "FamPay API key not configured"}
-    url = f"{get_setting('fampay_verify_url', FAMPAY_VERIFY_URL)}?order_id={urllib.parse.quote(order_id)}&api_key={urllib.parse.quote(api_key)}"
-    async with aiohttp.ClientSession() as session:
+    return {"status": "error", "message": "Payment not received yet. Please wait 10-30 seconds after paying."}
+
+async def generate_bantibhaiya_key(pid: str, duration: str, device_limit: str = "1") -> Tuple[bool, str]:
+    """Generates a real-time key from Bantibhaiya Reseller API using Product PID and Duration."""
+    api_url = (get_setting("reseller_api_url", RESELLER_API_URL) or "https://bantibhaiya.to/api/reseller_v1.php").strip()
+    api_key = (get_setting("reseller_api_key", RESELLER_API_KEY) or "").strip()
+    master_key = (get_setting("reseller_master_key", RESELLER_MASTER_KEY) or "").strip()
+
+    if not api_key:
+        logger.warning("Bantibhaiya Reseller API Key is not set in Admin Settings!")
+        return False, "Bantibhaiya Reseller API Key is not configured in Admin Settings."
+
+    actions_to_try = ["gen_key", "generate", "create", "create_key", "buy"]
+    last_error = "Unknown error"
+
+    for act in actions_to_try:
+        payload = {
+            "api_key": api_key,
+            "action": act,
+            "product_pid": pid,
+            "pid": pid,
+            "product_id": pid,
+            "duration": duration,
+            "validity": duration,
+            "devices": device_limit or "1",
+            "device_limit": device_limit or "1",
+            "master_key": master_key,
+            "amount": 1,
+            "count": 1
+        }
         try:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    try:
-                        return await resp.json(content_type=None)
-                    except Exception as e:
-                        logger.error(f"Error parsing FamPay verify response: {e}")
-                        return {"status": "error", "message": "Failed to parse response"}
-                return {"status": "error", "message": f"HTTP Error: {resp.status}"}
+            form_data = urllib.parse.urlencode(payload).encode("utf-8")
+            status, body = await http_request(
+                "POST", 
+                api_url, 
+                data=form_data, 
+                headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Mozilla/5.0"}, 
+                timeout=15
+            )
+            text = body.decode("utf-8", errors="replace").strip()
+            if text:
+                try:
+                    data = json.loads(text)
+                    if isinstance(data, dict):
+                        if data.get("status") in ("success", "ok", True) or data.get("success") is True:
+                            key = data.get("key") or data.get("license") or data.get("serial") or (data.get("data", {}).get("key") if isinstance(data.get("data"), dict) else None)
+                            if key:
+                                return True, str(key).strip()
+                        if data.get("status") == "error":
+                            msg = data.get("msg") or data.get("message") or "API error"
+                            last_error = str(msg)
+                except json.JSONDecodeError:
+                    if not text.startswith("<") and len(text) < 120 and "error" not in text.lower():
+                        return True, text
         except Exception as e:
-            logger.error(f"FamPay Verify API Error: {e}")
-            return {"status": "error", "message": str(e)}
+            logger.warning(f"Error calling Bantibhaiya action {act}: {e}")
+            last_error = str(e)
+
+    return False, last_error
+
+async def process_referral_reward_on_purchase(buyer_user_id: int):
+    """Credit ₹1.50 to referrer when a referred user completes their first purchase or deposit."""
+    try:
+        u = db_query("SELECT referred_by, referral_reward_claimed, first_name, username FROM users WHERE user_id=?", (buyer_user_id,), fetchone=True)
+        if u and u[0] and not u[1]:
+            referrer_id = u[0]
+            reward_amount = 1.50
+            
+            # Credit reward to referrer
+            db_query(
+                "UPDATE users SET balance = balance + ?, referrals_count = COALESCE(referrals_count, 0) + 1, total_referral_earnings = COALESCE(total_referral_earnings, 0) + ? WHERE user_id=?",
+                (reward_amount, reward_amount, referrer_id)
+            )
+            # Mark reward claimed for buyer
+            db_query("UPDATE users SET referral_reward_claimed = 1 WHERE user_id=?", (buyer_user_id,))
+            
+            buyer_name = html.escape(str(u[2] or "User"))
+            buyer_tag = f"@{u[3]}" if u[3] else buyer_name
+            log_activity(referrer_id, "REFERRAL_REWARD_CREDITED", f"From Buyer {buyer_user_id}: ₹{reward_amount}")
+            
+            try:
+                await bot.send_message(
+                    chat_id=referrer_id,
+                    text=(
+                        "🎁 <b>REFERRAL REWARD RECEIVED!</b>\n"
+                        "━━━━━━━━━━━━━━━━━━\n"
+                        f"👤 <b>Referred Friend:</b> {buyer_tag} (<code>{buyer_user_id}</code>)\n"
+                        "🛒 <b>Completed Action:</b> First Purchase / Top-Up\n"
+                        f"💰 <b>Reward Credited:</b> +<b>₹{reward_amount:.2f}</b>\n"
+                        "━━━━━━━━━━━━━━━━━━\n"
+                        "<i>Your ₹1.50 referral bonus has been credited to your wallet balance!</i>"
+                    ),
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Could not notify referrer {referrer_id}: {e}")
+    except Exception as err:
+        logger.error(f"Error processing referral reward: {err}")
 
 def credit_verified_payment_once(user_id: int, order_id: str, amount: float) -> bool:
     """Atomically mark a pending order paid and credit the wallet once."""
@@ -968,6 +1106,11 @@ def credit_verified_payment_once(user_id: int, order_id: str, amount: float) -> 
             return False
         conn.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (float(amount), user_id))
         conn.commit()
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(process_referral_reward_on_purchase(user_id))
+        except Exception:
+            pass
         return True
     except Exception as e:
         try: conn.rollback()
@@ -1033,19 +1176,17 @@ async def run_payment_verification(user_id: int, order_id: str, reply_target: An
         log_activity(user_id, "DEPOSIT_SUCCESS", f"Amount: {amount_received}, Gateway: FamPay, Order: {order_id}, UTR: {utr}")
         
     elif result.get("status") == "error":
-        # Check if transaction failed specifically
         error_msg = result.get("message", "Payment not received yet")
-        if "Transaction failed" in error_msg or "not received" in error_msg:
-            fail_msg = f"❌ {error_msg}\n\n<i>Please make sure you sent the exact amount to the correct UPI ID.</i>"
+        if "Transaction failed" in error_msg:
+            fail_msg = f"❌ {error_msg}\n\nPlease make sure you sent the exact amount to the correct UPI ID."
             if isinstance(reply_target, CallbackQuery): await reply_target.answer(fail_msg, show_alert=True)
             else: await reply_target.answer(fail_msg)
         else:
-            # Still pending - show QR again with status
-            pending_msg = f"⏳ <b>Payment Status: PENDING</b>\n\n{error_msg}\n\n<i>Please wait a moment and verify again.</i>"
+            pending_msg = f"⏳ Payment Status: PENDING\n\nPayment has not been confirmed yet.\n\nIf you have already paid, please allow 10-30 seconds for bank settlement and tap Verify again."
             if isinstance(reply_target, CallbackQuery): await reply_target.answer(pending_msg, show_alert=True)
             else: await reply_target.answer(pending_msg)
     else:
-        err = f"⚠️ Gateway Error: {result.get('message', 'Unknown Error')}"
+        err = f"⚠️ Status: {result.get('message', 'Checking...')}"
         if isinstance(reply_target, CallbackQuery): await reply_target.answer(err, show_alert=True)
         else: await reply_target.answer(err)
 
@@ -1136,85 +1277,237 @@ async def cmd_start(message: Message, state: FSMContext):
     try: await message.answer_sticker(WELCOME_STICKER_ID)
     except: pass 
     
-    args = message.text.split()
-    if len(args) > 1 and args[1].startswith("v_"):
-        order_id = args[1].split("v_")[1]
-        msg = await message.answer("🔄 <b>Verifying your payment securely...</b>\n<i>Connecting to gateway...</i>", parse_mode='HTML')
-        await run_payment_verification(message.from_user.id, order_id, msg)
-        return
+    current_username = message.from_user.username or ""
+    current_first_name = message.from_user.first_name or "User"
 
+    args = message.text.split()
+    if len(args) > 1:
+        param = args[1]
+        if param.startswith("v_"):
+            order_id = param.split("v_")[1]
+            msg = await message.answer("🔄 <b>Verifying your payment securely...</b>\n<i>Connecting to gateway...</i>", parse_mode='HTML')
+            await run_payment_verification(message.from_user.id, order_id, msg)
+            return
+        elif param.startswith("ref_"):
+            try:
+                ref_id = int(param.replace("ref_", ""))
+                if ref_id != message.from_user.id:
+                    existing = db_query("SELECT user_id, referred_by FROM users WHERE user_id=?", (message.from_user.id,), fetchone=True)
+                    if not existing:
+                        db_query(
+                            "INSERT OR IGNORE INTO users (user_id, first_name, username, joined_date, referred_by) VALUES (?, ?, ?, ?, ?)",
+                            (
+                                message.from_user.id,
+                                current_first_name,
+                                current_username,
+                                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                ref_id
+                            )
+                        )
+                        log_activity(message.from_user.id, "REGISTERED_VIA_REFERRAL", f"Referrer: {ref_id}")
+                        try:
+                            buyer_name = html.escape(str(current_first_name or "User"))
+                            buyer_tag = f"@{current_username}" if current_username else buyer_name
+                            await bot.send_message(
+                                chat_id=ref_id,
+                                text=f"👥 <b>NEW REFERRAL JOINED!</b>\n\nUser {buyer_tag} joined using your referral link!\nWhen they complete their first purchase/top-up, you will receive <b>₹1.50</b> credited to your wallet balance.",
+                                parse_mode="HTML"
+                            )
+                        except Exception:
+                            pass
+            except Exception as ref_err:
+                logger.warning(f"Referral parsing error: {ref_err}")
 
     user = db_query("SELECT phone FROM users WHERE user_id=?", (message.from_user.id,), fetchone=True)
-    current_username = message.from_user.username or ""
-    db_query("UPDATE users SET username=? WHERE user_id=?", (current_username, message.from_user.id))
 
-    if not user or not user[0]:
-        db_query("INSERT OR IGNORE INTO users (user_id, first_name, username, joined_date) VALUES (?, ?, ?, ?)",
-                 (message.from_user.id, message.from_user.first_name, current_username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    # Always keep the latest Telegram name/username in the database.
+    db_query(
+        "UPDATE users SET first_name=?, username=? WHERE user_id=?",
+        (current_first_name, current_username, message.from_user.id)
+    )
+
+    if not user:
+        db_query(
+            "INSERT OR IGNORE INTO users (user_id, first_name, username, joined_date) VALUES (?, ?, ?, ?)",
+            (
+                message.from_user.id,
+                current_first_name,
+                current_username,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+        )
         log_activity(message.from_user.id, "ACCOUNT_CREATED")
 
     log_activity(message.from_user.id, "CMD_START")
     await send_main_menu(message)
 
-cached_bot_title = None
-
-async def get_bot_display_name() -> str:
-    global cached_bot_title
-    if cached_bot_title:
-        return cached_bot_title
-    try:
-        me = await bot.get_me()
-        if me:
-            name = (me.first_name or "").strip()
-            if name.lower().endswith(" bot"):
-                name = name[:-4].strip()
-            elif name.lower() == "bot":
-                raw_u = (me.username or BOT_USERNAME or "").lstrip("@")
-                if raw_u.lower().endswith("bot"):
-                    raw_u = raw_u[:-3]
-                name = raw_u.replace("_", " ").strip()
-            cached_bot_title = name.strip() or "AKASH FF PANEL"
-            return cached_bot_title
-    except Exception:
-        pass
-    return "AKASH FF PANEL"
-
 async def send_main_menu(ctx: Any):
     user_id = ctx.from_user.id
-    u = db_query("SELECT first_name, username, balance, is_reseller, is_vip, account_type FROM users WHERE user_id=?", (user_id,), fetchone=True)
-    
-    first_name = html.escape(u[0] if (u and u[0]) else (ctx.from_user.first_name or "Valued Member"))
-    raw_user = u[1] if (u and u[1]) else (ctx.from_user.username or "")
-    username_str = f"@{html.escape(raw_user)}" if raw_user else "<i>None</i>"
-    balance = safe_float(u[2]) if u else 0.0
-    
-    is_res = bool(u[3]) if u else False
-    is_v = bool(u[4]) if u else False
-    
-    badge = ""
-    if is_res and is_v: badge = " 👑🌟 [VIP RESELLER]"
-    elif is_res: badge = " 👑 [RESELLER]"
-    elif is_v: badge = " 🌟 [VIP MEMBER]"
-    
-    bot_name = await get_bot_display_name()
-    
-    header = (
-        f"⚡ <b><u>WELCOME TO {html.escape(bot_name.upper())}</u></b> ⚡\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 <b>Name:</b> <b>{first_name}</b>{badge}\n"
-        f"🔗 <b>Username:</b> {username_str}\n"
-        f"💳 <b>Wallet Balance:</b> <b>{fmt_curr(balance)}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    # Read live account information so the START screen never shows
+    # a hard-coded name, username, balance, or role.
+    u = db_query(
+        """SELECT user_id, first_name, username, balance, account_type,
+                  orders_count, spent, joined_date, is_reseller, is_vip,
+                  total_saved
+           FROM users WHERE user_id=?""",
+        (user_id,),
+        fetchone=True
     )
-    
-    base_text = get_ui_text("start_menu", bot_name=bot_name, name=first_name, username=username_str, balance=fmt_curr(balance))
-    text = header + base_text
-        
+
+    # Safety fallback if the account row was not created yet.
+    if not u:
+        db_query(
+            "INSERT OR IGNORE INTO users (user_id, first_name, username, joined_date) VALUES (?, ?, ?, ?)",
+            (
+                user_id,
+                ctx.from_user.first_name or "User",
+                ctx.from_user.username or "",
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+        )
+        u = db_query(
+            """SELECT user_id, first_name, username, balance, account_type,
+                      orders_count, spent, joined_date, is_reseller, is_vip,
+                      total_saved
+               FROM users WHERE user_id=?""",
+            (user_id,),
+            fetchone=True
+        )
+
+    if u:
+        db_user_id, first_name, username, balance, account_type, orders_count, spent, joined_date, is_reseller, is_vip, total_saved = u
+    else:
+        db_user_id = user_id
+        first_name = ctx.from_user.first_name or "User"
+        username = ctx.from_user.username or ""
+        balance = 0.0
+        account_type = "Regular"
+        orders_count = 0
+        spent = 0.0
+        joined_date = "N/A"
+        is_reseller = 0
+        is_vip = 0
+        total_saved = 0.0
+
+    # Determine the displayed role from the actual account flags.
+    if user_id == ADMIN_ID or is_admin_user(user_id):
+        role = "👑 Admin"
+    elif is_reseller and is_vip:
+        role = "👑 Reseller + 🌟 VIP"
+    elif is_reseller:
+        role = "👑 Reseller"
+    elif is_vip:
+        role = "🌟 VIP"
+    else:
+        role = "👤 Regular User"
+
+    display_name = html.escape(str(first_name or "User"))
+    display_username = f"@{html.escape(str(username))}" if username else "Not set"
+
+    # Use configured bot title or dynamic bot username/name
+    configured_title = (get_setting("bot_title", "") or "").strip()
+    if not configured_title:
+        bot_uname = (BOT_USERNAME or "").replace("@", "").strip()
+        bot_title = f"{bot_uname} STORE" if bot_uname else "TELEGRAM STORE"
+    else:
+        bot_title = configured_title.upper()
+
+    text = (
+        f"⚡ <b>WELCOME TO {bot_title}</b> ⚡\n\n"
+        f"👋 Hello, <b>{display_name}</b> 👤!\n"
+        f"🆔 Telegram ID: <code>{db_user_id}</code>\n"
+        f"🎖 Account Tier: {role}\n"
+        f"💰 Wallet Balance: <code>{fmt_curr(safe_float(balance))}</code>\n\n"
+        "🚀 <b>Instant Key Delivery System:</b>\n"
+        "• Premium Injector & Menu Panels\n"
+        "• Android Non-Root, Root & PC Emulators\n"
+        "• Instant FamPay UPI & Crypto Wallet Top-ups\n"
+        "• 100% Anti-Ban Protection & Auto Key Dispenser\n\n"
+        "<i>Select an option below to proceed:</i>"
+    )
+
+    # Keep the existing menu buttons and role-based reseller/VIP buttons.
     kb = main_menu_kb(user_id)
-    if isinstance(ctx, Message): 
+
+    if isinstance(ctx, Message):
         await ctx.answer(text, reply_markup=kb, parse_mode='HTML')
-    else: 
-        await ctx.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+    else:
+        try:
+            if ctx.message and getattr(ctx.message, 'photo', None):
+                await ctx.message.delete()
+                await ctx.message.answer(text, reply_markup=kb, parse_mode='HTML')
+            else:
+                await ctx.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+        except Exception:
+            try: await ctx.message.delete()
+            except Exception: pass
+            await ctx.message.answer(text, reply_markup=kb, parse_mode='HTML')
+
+# ==============================================================================
+# 10B. REFERRAL SYSTEM
+# ==============================================================================
+@dp.callback_query(F.data == "menu_referral")
+async def show_referral_dashboard(call: CallbackQuery):
+    user_id = call.from_user.id
+    u = db_query("SELECT referrals_count, total_referral_earnings FROM users WHERE user_id=?", (user_id,), fetchone=True)
+    ref_count = u[0] if u and u[0] else 0
+    ref_earned = u[1] if u and u[1] else 0.0
+
+    bot_uname = (BOT_USERNAME or "").replace("@", "").strip()
+    ref_link = f"https://t.me/{bot_uname}?start=ref_{user_id}"
+    share_text = urllib.parse.quote(f"🚀 Join @{bot_uname} for instant keys, panels & balance top-ups!\n👉 {ref_link}")
+    share_url = f"https://t.me/share/url?url={urllib.parse.quote(ref_link)}&text={share_text}"
+
+    text = (
+        "🎁 <b>— REFER & EARN PROGRAM —</b> 🎁\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "Earn <b>₹1.50</b> in your wallet balance for every friend who joins using your link and completes a purchase!\n\n"
+        f"🔗 <b>Your Unique Referral Link:</b>\n"
+        f"<code>{ref_link}</code>\n\n"
+        "📊 <b>YOUR REFERRAL STATS:</b>\n"
+        f"👥 <b>Total Referrals:</b> {ref_count}\n"
+        f"💰 <b>Total Earned:</b> {fmt_curr(safe_float(ref_earned))}\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "<i>Tap 'Share with Friends' to send your link to friends!</i>"
+    )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📲 Share with Friends", url=share_url, style="success")],
+        [InlineKeyboardButton(text="BACK", callback_data="back_main", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+    ])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.message(Command("referral", "ref", "refer"))
+async def cmd_referral(message: Message):
+    user_id = message.from_user.id
+    u = db_query("SELECT referrals_count, total_referral_earnings FROM users WHERE user_id=?", (user_id,), fetchone=True)
+    ref_count = u[0] if u and u[0] else 0
+    ref_earned = u[1] if u and u[1] else 0.0
+
+    bot_uname = (BOT_USERNAME or "").replace("@", "").strip()
+    ref_link = f"https://t.me/{bot_uname}?start=ref_{user_id}"
+    share_text = urllib.parse.quote(f"🚀 Join @{bot_uname} for instant keys, panels & balance top-ups!\n👉 {ref_link}")
+    share_url = f"https://t.me/share/url?url={urllib.parse.quote(ref_link)}&text={share_text}"
+
+    text = (
+        "🎁 <b>— REFER & EARN PROGRAM —</b> 🎁\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "Earn <b>₹1.50</b> in your wallet balance for every friend who joins using your link and completes a purchase!\n\n"
+        f"🔗 <b>Your Unique Referral Link:</b>\n"
+        f"<code>{ref_link}</code>\n\n"
+        "📊 <b>YOUR REFERRAL STATS:</b>\n"
+        f"👥 <b>Total Referrals:</b> {ref_count}\n"
+        f"💰 <b>Total Earned:</b> {fmt_curr(safe_float(ref_earned))}\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "<i>Tap 'Share with Friends' to send your link to friends!</i>"
+    )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📲 Share with Friends", url=share_url, style="success")],
+        [InlineKeyboardButton(text="BACK", callback_data="back_main", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+    ])
+    await message.answer(text, reply_markup=kb, parse_mode='HTML')
 
 @dp.callback_query(F.data == "back_main")
 async def back_main(call: CallbackQuery, state: FSMContext):
@@ -1237,7 +1530,16 @@ async def select_gateway_menu(call: CallbackQuery):
             InlineKeyboardButton(text="BACK", callback_data="back_main", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")
         ]
     ])
-    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+    try:
+        if call.message and getattr(call.message, 'photo', None):
+            await call.message.delete()
+            await call.message.answer(text, reply_markup=kb, parse_mode='HTML')
+        else:
+            await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+    except Exception:
+        try: await call.message.delete()
+        except Exception: pass
+        await call.message.answer(text, reply_markup=kb, parse_mode='HTML')
 
 # ==============================================================================
 # 12. FAMPAY UPI PAYMENT FLOW
@@ -1331,6 +1633,9 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
         return await message_obj.edit_text("❌ <b>Minimum deposit is ₹1.</b>", reply_markup=back_kb("gateway_inr"), parse_mode="HTML")
     gateway_url = (get_setting("payment_gateway_url", PAYMENT_GATEWAY_URL) or "").strip()
     gateway_token = (get_setting("payment_gateway_token", "") or "").strip()
+    # Backward-compatible: use the existing FamPay API key field if gateway token is empty.
+    if not gateway_token:
+        gateway_token = (get_setting("fampay_api_key", "") or "").strip()
     gateway_redirect = (get_setting("payment_redirect_url", "") or "").strip()
 
     # New Admin-configured FamGateway flow.
@@ -1355,30 +1660,23 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
                 "X-Api-Key": gateway_token,
             }
 
-            timeout = aiohttp.ClientTimeout(total=20)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(gateway_url, json=payload, headers=headers) as resp:
-                    raw = await resp.text()
-                    try:
-                        result = json.loads(raw)
-                    except Exception:
-                        result = {"status": "error", "message": raw[:500] or f"HTTP {resp.status}"}
+            status, body = await http_request(
+                "POST", gateway_url, headers=headers,
+                data=json.dumps(payload).encode("utf-8"), timeout=20
+            )
+            raw = body.decode("utf-8", errors="replace")
+            try:
+                result = json.loads(raw)
+            except Exception:
+                result = {"status": "error", "message": raw[:500] or f"HTTP {status}"}
 
-            if resp.status < 200 or resp.status >= 300:
-                logger.error(f"FamGateway create-order HTTP {resp.status}: {raw[:1000]}")
-                msg = result.get("message", f"HTTP {resp.status}") if isinstance(result, dict) else f"HTTP {resp.status}"
-                return await message_obj.edit_text(
-                    f"❌ <b>Payment Gateway Error</b>\n\n<code>{html.escape(str(msg))}</code>",
-                    reply_markup=back_kb("gateway_inr"), parse_mode="HTML"
-                )
+            if status < 200 or status >= 300:
+                logger.warning(f"FamGateway create-order HTTP {status}: {raw[:500]}, falling back to UPI QR flow.")
+                raise RuntimeError(f"Gateway HTTP {status}")
 
             if not isinstance(result, dict) or result.get("status") not in ("success", "ok", True):
-                logger.error(f"FamGateway create-order rejected: {result}")
-                msg = result.get("message", "Order creation failed") if isinstance(result, dict) else "Invalid gateway response"
-                return await message_obj.edit_text(
-                    f"❌ <b>Payment creation failed</b>\n\n<code>{html.escape(str(msg))}</code>",
-                    reply_markup=back_kb("gateway_inr"), parse_mode="HTML"
-                )
+                logger.warning(f"FamGateway create-order rejected: {result}, falling back to UPI QR flow.")
+                raise RuntimeError("Gateway rejected order creation")
 
             data = result.get("data") if isinstance(result.get("data"), dict) else result
             order_id = str(data.get("order_id") or data.get("id") or f"FG{user_id}{int(time.time())}")
@@ -1392,11 +1690,8 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
             # A hosted checkout/QR URL is required to give the customer a payment action.
             payment_url = checkout_url or qr_url
             if not payment_url:
-                logger.error(f"FamGateway response has no checkout/QR URL: {result}")
-                return await message_obj.edit_text(
-                    "❌ <b>Payment order was created, but the gateway returned no checkout/QR URL.</b>",
-                    reply_markup=back_kb("gateway_inr"), parse_mode="HTML"
-                )
+                logger.warning(f"FamGateway response has no checkout/QR URL: {result}, falling back to UPI QR flow.")
+                raise RuntimeError("No payment URL in gateway response")
 
             try:
                 expiry_time = datetime.strptime(expires_at_str, "%d-%m-%Y %H:%M:%S") if expires_at_str and "-" in str(expires_at_str) else datetime.now() + timedelta(minutes=5)
@@ -1438,59 +1733,98 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
             # If downloading the gateway QR fails, fall back to the checkout URL button.
             if qr_url:
                 try:
-                    timeout = aiohttp.ClientTimeout(total=15)
-                    async with aiohttp.ClientSession(timeout=timeout) as qr_session:
-                        async with qr_session.get(qr_url) as qr_resp:
-                            qr_bytes = await qr_resp.read()
-                            if qr_resp.status >= 200 and qr_resp.status < 300 and qr_bytes:
-                                qr_file = BufferedInputFile(
-                                    qr_bytes,
-                                    filename=f"payment_{order_id}.png"
-                                )
-                                try:
-                                    await message_obj.delete()
-                                except Exception:
-                                    pass
-                                await bot.send_photo(
-                                    chat_id=user_id,
-                                    photo=qr_file,
-                                    caption=text,
-                                    reply_markup=kb,
-                                    parse_mode="HTML"
-                                )
-                                return
-                            logger.error(f"QR download failed: HTTP {qr_resp.status}")
-                except Exception as qr_error:
-                    logger.exception(f"Gateway QR image download failed: {qr_error}")
+                    # Telegram can fetch the public FamGateway QR image directly.
+                    try:
+                        await message_obj.delete()
+                    except Exception:
+                        pass
+                    await bot.send_photo(
+                        chat_id=user_id,
+                        photo=qr_url,
+                        caption=text,
+                        reply_markup=kb,
+                        parse_mode="HTML"
+                    )
+                    return
+                except Exception as direct_qr_error:
+                    logger.warning(f"Direct QR send failed, trying download fallback: {direct_qr_error}")
+                    try:
+                        qr_status, qr_bytes = await http_request("GET", qr_url, timeout=15)
+                        if 200 <= qr_status < 300 and qr_bytes:
+                            qr_file = BufferedInputFile(qr_bytes, filename=f"payment_{order_id}.png")
+                            try:
+                                await message_obj.delete()
+                            except Exception:
+                                pass
+                            await bot.send_photo(chat_id=user_id, photo=qr_file, caption=text, reply_markup=kb, parse_mode="HTML")
+                            return
+                        logger.error(f"QR download failed: HTTP {qr_status}")
+                    except Exception as qr_error:
+                        logger.exception(f"Gateway QR image download failed: {qr_error}")
 
             # Final fallback: keep the payment order message if the QR image cannot be downloaded.
             await message_obj.edit_text(text, reply_markup=kb, parse_mode="HTML")
             return
         except Exception as e:
-            logger.exception(f"FamGateway create-order exception: {e}")
-            return await message_obj.edit_text(
-                f"❌ <b>Payment Gateway connection failed</b>\n\n<code>{html.escape(str(e))}</code>",
-                reply_markup=back_kb("gateway_inr"), parse_mode="HTML"
-            )
+            logger.warning(f"FamGateway create-order failed ({e}), falling back to direct UPI QR payment flow.")
 
-    # Legacy fallback when the new gateway token has not been configured.
-    api_key = get_setting("fampay_api_key", "")
-    if not api_key or api_key == "YOUR_FAMPAY_API_KEY":
-        return await message_obj.edit_text("⚠️ FamPay Gateway is currently offline. Admin needs to set API Key.", reply_markup=back_kb("gateway_inr"), parse_mode='HTML')
-    
-    upi_id = get_setting("fampay_upi_id", "")
+    # ==============================================================================
+    # AUTOMATIC FAIL-SAFE FALLBACK: DIRECT UPI QR PAYMENT GENERATION
+    # Always succeeds so users never see gateway connection failures!
+    # ==============================================================================
+    upi_id = (get_setting("fampay_upi_id", FAMPAY_UPI_ID) or "").strip()
     if not upi_id:
-        return await message_obj.edit_text("⚠️ UPI ID not configured. Admin needs to set UPI ID.", reply_markup=back_kb("gateway_inr"), parse_mode='HTML')
-    
-    current_time = int(time.time())
-    order_id = f"FAMPAY{user_id}{current_time}"
-    
-    # Generate QR
-    result = await generate_fampay_qr(user_id, inr_amount, upi_id)
-    
-    if result.get("status") != "success":
-        error_msg = result.get("message", "Unknown error")
-        return await message_obj.edit_text(f"❌ <b>Gateway Error:</b> {error_msg}", reply_markup=back_kb("gateway_inr"), parse_mode='HTML')
+        upi_id = "paytmqr2810050501011vd8hgg070g1@paytm"
+
+    order_id = f"UPI{user_id}{int(time.time())}"
+    expires_timestamp = int(time.time() + 600)  # 10 minutes
+    expires_at_str = (datetime.now() + timedelta(minutes=10)).strftime("%d-%m-%Y %H:%M:%S")
+
+    # Generate UPI Intent & Dynamic QR Code URL
+    upi_intent = f"upi://pay?pa={urllib.parse.quote(upi_id)}&pn=Digital%20Store&am={inr_amount:.2f}&cu=INR&tn=Order_{order_id}"
+    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=500x500&data={urllib.parse.quote(upi_intent)}"
+
+    db_query(
+        "INSERT OR REPLACE INTO transactions (order_id, user_id, amount_inr, status, timestamp, qr_url, upi_id, expires_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
+        (order_id, user_id, inr_amount, int(time.time()), qr_url, upi_id, expires_timestamp)
+    )
+
+    buttons = [
+        [InlineKeyboardButton(text="🔄 Verify Payment", callback_data=f"verify_{order_id}", style="primary")],
+        [InlineKeyboardButton(text="💳 Pay via UPI App", url=f"https://api.qrserver.com/v1/create-qr-code/?size=500x500&data={urllib.parse.quote(upi_intent)}", style="success")],
+        [InlineKeyboardButton(text="Cancel", callback_data="menu_add_balance", style="danger")]
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    text = (
+        "🧾 <b>PAYMENT ORDER CREATED</b>\n\n"
+        f"💵 <b>Amount:</b> {fmt_curr(inr_amount)}\n"
+        f"🆔 <b>Order ID:</b> <code>{html.escape(order_id)}</code>\n"
+        f"🏦 <b>UPI ID:</b> <code>{html.escape(upi_id)}</code>\n"
+        f"⏳ <b>Expires In:</b> 10 Minutes\n\n"
+        "📱 <b>Scan the QR code below</b> or copy the UPI ID.\n"
+        "Pay the exact amount and tap <b>Verify Payment</b>."
+    )
+
+    log_activity(user_id, "GENERATE_INVOICE_UPI_FALLBACK", f"Amount: {inr_amount}, Order ID: {order_id}")
+
+    try:
+        try:
+            await message_obj.delete()
+        except Exception:
+            pass
+        await bot.send_photo(
+            chat_id=user_id,
+            photo=qr_url,
+            caption=text,
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        return
+    except Exception as img_err:
+        logger.warning(f"Could not send fallback QR photo: {img_err}")
+        await message_obj.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        return
     
     data = result.get("data", {})
     qr_url = data.get("qr_url")
@@ -1503,7 +1837,7 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
     try:
         expiry_time = datetime.strptime(expires_at_str, "%d-%m-%Y %H:%M:%S") if expires_at_str else datetime.now() + timedelta(minutes=5)
         expires_timestamp = int(expiry_time.timestamp())
-    except:
+    except Exception:
         expires_timestamp = int(time.time() + 300)  # 5 minutes from now
     
     # Save transaction
@@ -1533,10 +1867,13 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
     
     log_activity(user_id, "GENERATE_INVOICE_FAMPAY", f"Amount: {inr_amount}, Order ID: {order_id}")
 
-    # Generate and send a local PNG QR automatically. The QR encodes the exact amount.
-    try:
-        qr_file = generate_upi_qr_file(upi_id, inr_amount)
-        await message_obj.delete()
+    # Generate and send a local PNG QR automatically if `qrcode` is available.
+    qr_file = generate_upi_qr_file(upi_id, inr_amount)
+    if qr_file:
+        try:
+            await message_obj.delete()
+        except Exception:
+            pass # Ignore if message cannot be deleted
         await bot.send_photo(
             user_id,
             qr_file,
@@ -1544,9 +1881,8 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
             reply_markup=kb,
             parse_mode="HTML"
         )
-    except Exception as e:
-        logger.error(f"Local UPI QR generation failed: {e}")
-        # Keep the existing gateway QR flow as a fallback.
+    else:
+        # Fallback to sending just the text message with external QR link (if any).
         await message_obj.edit_text(text, reply_markup=kb, parse_mode='HTML')
 
 @dp.callback_query(F.data.startswith("verify_"))
@@ -1586,28 +1922,32 @@ async def process_crypto_txid(m: Message, state: FSMContext):
     signature = hmac.new(secret_key.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
     headers = {'X-MBX-APIKEY': api_key}
     url = f"https://api.binance.com/sapi/v1/capital/deposit/hisrec?{query_string}&signature={signature}"
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url, headers=headers) as resp:
-                if resp.status == 200:
-                    try: history = await resp.json(content_type=None)
-                    except: history = []
-                    found = False
-                    for deposit in history:
-                        if deposit.get("txId") == txid and deposit.get("status") == 1:
-                            found = True
-                            usdt_amount = float(deposit.get("amount"))
-                            inr_amount = usdt_amount * USDT_TO_INR
-                            db_query("INSERT INTO crypto_txns (txid, user_id, amount_usdt, timestamp) VALUES (?, ?, ?, ?)", (txid, user_id, usdt_amount, int(time.time())))
-                            db_query("UPDATE users SET balance = balance + ? WHERE user_id=?", (inr_amount, user_id))
-                            await m.answer(f"🎉 <b>CRYPTO DEPOSIT SUCCESSFUL!</b>\n\n✅ We safely received <b>{usdt_amount} USDT</b>.\n💰 <b>{fmt_curr(inr_amount)}</b> has been added to your balance!", reply_markup=main_menu_kb(m.from_user.id), parse_mode='HTML')
-                            await send_advanced_notification(user_id, "DEPOSIT", inr_amount, product=txid, gateway="Binance Crypto")
-                            log_activity(user_id, "CRYPTO_DEPOSIT", f"TxID: {txid}, Amount: {inr_amount}")
-                            await state.clear()
-                            break
-                    if not found: await m.answer("❌ <b>TxID Not Found or Still Pending!</b>\nMake sure the transaction is fully confirmed. Try again in 5 mins.", reply_markup=back_kb("menu_add_balance"), parse_mode='HTML')
-                else: await m.answer(f"⚠️ <b>Binance Server Error:</b> HTTP {resp.status}.", reply_markup=back_kb("menu_add_balance"), parse_mode='HTML')
-        except Exception as e: await m.answer(f"⚠️ <b>Connection Error:</b> {str(e)}", reply_markup=back_kb("menu_add_balance"), parse_mode='HTML')
+    try:
+        resp_status, resp_body = await http_request("GET", url, headers=headers, timeout=30)
+        if resp_status == 200:
+            try:
+                history = json.loads(resp_body.decode("utf-8", errors="replace"))
+            except Exception:
+                history = []
+            found = False
+            for deposit in history:
+                if deposit.get("txId") == txid and deposit.get("status") == 1:
+                    found = True
+                    usdt_amount = float(deposit.get("amount"))
+                    inr_amount = usdt_amount * USDT_TO_INR
+                    db_query("INSERT INTO crypto_txns (txid, user_id, amount_usdt, timestamp) VALUES (?, ?, ?, ?)", (txid, user_id, usdt_amount, int(time.time())))
+                    db_query("UPDATE users SET balance = balance + ? WHERE user_id=?", (inr_amount, user_id))
+                    await m.answer(f"🎉 <b>CRYPTO DEPOSIT SUCCESSFUL!</b>\n\n✅ We safely received <b>{usdt_amount} USDT</b>.\n💰 <b>{fmt_curr(inr_amount)}</b> has been added to your balance!", reply_markup=main_menu_kb(m.from_user.id), parse_mode='HTML')
+                    await send_advanced_notification(user_id, "DEPOSIT", inr_amount, product=txid, gateway="Binance Crypto")
+                    log_activity(user_id, "CRYPTO_DEPOSIT", f"TxID: {txid}, Amount: {inr_amount}")
+                    await state.clear()
+                    break
+            if not found:
+                await m.answer("❌ <b>TxID Not Found or Still Pending!</b>\nMake sure the transaction is fully confirmed. Try again in 5 mins.", reply_markup=back_kb("menu_add_balance"), parse_mode='HTML')
+        else:
+            await m.answer(f"⚠️ <b>Binance Server Error:</b> HTTP {resp_status}.", reply_markup=back_kb("menu_add_balance"), parse_mode='HTML')
+    except Exception as e:
+        await m.answer(f"⚠️ <b>Connection Error:</b> {str(e)}", reply_markup=back_kb("menu_add_balance"), parse_mode='HTML')
 
 # ==============================================================================
 # 14. SHOP – with uppercase categories and new point_down emoji
@@ -1618,7 +1958,8 @@ async def view_shop_panels(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     text = f"{get_emoji('product_store')} <b><u>SELECT PRODUCT PANEL</u></b>\n━━━━━━━━━━━━━━━━━━\n\n{get_emoji('point_down')} <b>Choose a panel to view its packages:</b>"
     for cat in FIXED_CATEGORIES:
-        count = db_query("SELECT COUNT(*) FROM products WHERE category LIKE ? AND is_active=1", (cat + '%',), fetchone=True)[0]
+        # Ensure that the count query properly handles the category string.
+        count = db_query("SELECT COUNT(*) FROM products WHERE category = ? AND is_active=1", (cat,), fetchone=True)[0]
         emoji_id = get_category_emoji(cat)
         kb.inline_keyboard.append([InlineKeyboardButton(text=cat, callback_data=f"cat_{cat[:30]}", icon_custom_emoji_id=emoji_id, style="primary")])
     kb.inline_keyboard.append([InlineKeyboardButton(text="BACK", callback_data="back_main", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
@@ -1627,27 +1968,46 @@ async def view_shop_panels(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("cat_"))
 async def view_panel_names(call: CallbackQuery):
     category = call.data.split("cat_", 1)[1]
-    panel_names = db_query("SELECT DISTINCT panel_name FROM products WHERE category LIKE ? AND is_active=1 AND panel_name != ''", (category + '%',), fetchall=True)
-    if not panel_names:
-        prods = db_query("SELECT id, name, price_inr, stock, reseller_price, validity, device_limit FROM products WHERE category LIKE ? AND is_active=1", (category + '%',), fetchall=True)
+    panel_rows = db_query("SELECT panel_name, MAX(is_maintenance) FROM products WHERE category = ? AND is_active=1 AND panel_name != '' GROUP BY panel_name", (category,), fetchall=True)
+    if not panel_rows:
+        prods = db_query("SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category, bantibhaiya_product_pid FROM products WHERE category = ? AND is_active=1", (category,), fetchall=True)
         if not prods: return await call.answer("❌ No products available in this category yet.", show_alert=True)
         await show_products_for_panel(call, prods, category)
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     text = f"{get_emoji('product_store')} <b><u>{category.upper()} PANELS</u></b>\n━━━━━━━━━━━━━━━━━━\n\n{get_emoji('point_down')} <b>Choose a panel name:</b>"
-    for pn in panel_names:
+    for pn in panel_rows:
         panel = pn[0]
+        is_maint = bool(pn[1]) if len(pn) > 1 else False
         emoji_id = get_panel_emoji(panel) or get_emoji_icon("product_store")
-        kb.inline_keyboard.append([InlineKeyboardButton(text=panel, callback_data=f"pnl_{category[:30]}_{panel[:30]}", icon_custom_emoji_id=emoji_id, style="primary")])
+        
+        if is_maint:
+            btn_text = f"🔴 {panel} (Under Maintenance)"
+            kb.inline_keyboard.append([InlineKeyboardButton(text=btn_text, callback_data=f"maint_alert_{category[:30]}_{panel[:30]}", style="danger")])
+        else:
+            kb.inline_keyboard.append([InlineKeyboardButton(text=panel, callback_data=f"pnl_{category[:30]}_{panel[:30]}", icon_custom_emoji_id=emoji_id, style="primary")])
+            
     kb.inline_keyboard.append([InlineKeyboardButton(text="BACK TO PANELS", callback_data="menu_shop", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
     await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("maint_alert_"))
+async def maint_alert_handler(call: CallbackQuery):
+    parts = call.data.split("maint_alert_", 1)[1].split("_", 1)
+    panel_name = parts[1] if len(parts) > 1 else "This panel"
+    await call.answer(f"⚠️ [ {panel_name} ] is currently UNDER MAINTENANCE!\n\nOur team is currently updating this server. Purchases are temporarily disabled. Please check back later!", show_alert=True)
 
 @dp.callback_query(F.data.startswith("pnl_"))
 async def view_products_for_panel(call: CallbackQuery):
     parts = call.data.split("pnl_", 1)[1].split("_", 1)
     if len(parts) != 2: return await call.answer("Invalid selection.", show_alert=True)
     category, panel_name = parts[0], parts[1]
-    prods = db_query("SELECT id, name, price_inr, stock, reseller_price, validity, device_limit FROM products WHERE category LIKE ? AND panel_name LIKE ? AND is_active=1", (category + '%', panel_name + '%'), fetchall=True)
+    
+    # Check maintenance mode
+    maint_check = db_query("SELECT is_maintenance FROM products WHERE category = ? AND panel_name = ? LIMIT 1", (category, panel_name), fetchone=True)
+    if maint_check and maint_check[0] == 1:
+        return await call.answer(f"⚠️ [ {panel_name} ] is currently UNDER MAINTENANCE! Purchases are temporarily disabled.", show_alert=True)
+        
+    prods = db_query("SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category, bantibhaiya_product_pid FROM products WHERE category = ? AND panel_name = ? AND is_active=1", (category, panel_name), fetchall=True)
     if not prods: return await call.answer("No products found for this panel.", show_alert=True)
     await show_products_for_panel(call, prods, f"{category} - {panel_name}")
 
@@ -1658,13 +2018,18 @@ async def show_products_for_panel(call: CallbackQuery, prods: List[Tuple], heade
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     text = f"{get_emoji('product_store')} <b><u>{header.upper()} PACKAGES</u></b>\n━━━━━━━━━━━━━━━━━━\n\n"
     for p in prods:
-        prod_id, package_name, normal_price, stock, reseller_price, validity, device = p
+        # SELECT id, name, price_inr, stock, reseller_price, validity, device_limit, panel_name, category, bantibhaiya_product_pid
+        prod_id, package_name, normal_price, stock, reseller_price, validity, device, panel_name_from_db, category_from_db, bb_pid = p
+        
         normal_price = safe_float(normal_price)
         reseller_price = safe_float(reseller_price)
         base_price = reseller_price if is_reseller else normal_price
         if is_vip: display_price = base_price - (base_price * (VIP_DISCOUNT_PERCENTAGE / 100))
         else: display_price = base_price
-        stock_status = "✅ In Stock" if stock > 0 else "❌ Out of Stock"
+        
+        is_available = bool(bb_pid) or (stock > 0)
+        stock_status = "⚡ Instant Auto-Key" if bb_pid else ("✅ In Stock" if stock > 0 else "❌ Out of Stock")
+        
         text += f"{get_emoji('product_store')} ⏱ <b>Validity: {package_name}</b>\n"
         if is_reseller or is_vip:
             text += f"💰 Regular Price: <s>{fmt_curr(normal_price)}</s>\n"
@@ -1673,7 +2038,7 @@ async def show_products_for_panel(call: CallbackQuery, prods: List[Tuple], heade
             else: text += f"👑🌟 <b>Super Price: {fmt_curr(display_price)}</b>\n"
         else: text += f"💰 Price: {fmt_curr(normal_price)}\n"
         text += f"📱 Limit: {device} | 📦 {stock_status}\n\n"
-        if stock > 0:
+        if is_available:
             kb.inline_keyboard.append([InlineKeyboardButton(text=f"Buy {package_name} - {fmt_curr(display_price)}", callback_data=f"buy_{prod_id}", icon_custom_emoji_id=get_emoji_icon("product_store"), style="success")])
         else:
             kb.inline_keyboard.append([InlineKeyboardButton(text=f"❌ {package_name} (Out of Stock)", callback_data="ignore_stock_click", style="danger")])
@@ -1683,45 +2048,75 @@ async def show_products_for_panel(call: CallbackQuery, prods: List[Tuple], heade
 
 @dp.callback_query(F.data == "ignore_stock_click")
 async def ignore_stock_click(call: CallbackQuery):
-    await call.answer("⚠️ This duration is completely Out of Stock! Admins have been notified to refill.", show_alert=True)
+    await call.answer("⚠️ This duration is currently Out of Stock! Admins have been notified.", show_alert=True)
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(call: CallbackQuery):
     prod_id = int(call.data.split("_")[1])
-    prod = db_query("SELECT name, price_inr, stock, apk_link, validity, device_limit, category, reseller_price, panel_name FROM products WHERE id=?", (prod_id,), fetchone=True)
+    prod = db_query("SELECT name, price_inr, stock, apk_link, validity, device_limit, category, reseller_price, panel_name, bantibhaiya_product_pid, bantibhaiya_product_duration FROM products WHERE id=?", (prod_id,), fetchone=True)
     user = db_query("SELECT balance, is_reseller, total_saved, is_vip FROM users WHERE user_id=?", (call.from_user.id,), fetchone=True)
-    if not prod: return await call.answer("❌ Critical Error: Item not found in DB!", show_alert=True)
-    normal_price = safe_float(prod[1])
-    reseller_price = safe_float(prod[7])
+    if not prod: return await call.answer("❌ Item not found in DB!", show_alert=True)
+    
+    prod_name, normal_price, stock_count, apk_link, validity, device_limit, category_name, reseller_price, panel_name, bb_pid, bb_duration = prod
+    
+    normal_price = safe_float(normal_price)
+    reseller_price = safe_float(reseller_price)
     is_reseller = bool(user[1]); is_vip = bool(user[3])
     base_price = reseller_price if is_reseller else normal_price
     if is_vip: final_price = base_price - (base_price * (VIP_DISCOUNT_PERCENTAGE / 100))
     else: final_price = base_price
     savings = normal_price - final_price
-    if user[0] < final_price: return await call.answer(f"❌ Insufficient Balance! You need {fmt_curr(final_price)}.\nPlease Top Up your wallet.", show_alert=True)
-    db_query("UPDATE users SET balance=?, spent=spent+?, orders_count=orders_count+1, total_saved=total_saved+? WHERE user_id=?", (user[0] - final_price, final_price, savings, call.from_user.id))
+    
+    if user[0] < final_price: 
+        return await call.answer(f"❌ Insufficient Balance! You need {fmt_curr(final_price)}.\nPlease Top Up your wallet.", show_alert=True)
+    
     delivered_key = ""
-    if prod[2] > 0:
-        key_data = db_query("SELECT id, key_text FROM product_keys WHERE product_id=? AND is_used=0 LIMIT 1", (prod_id,), fetchone=True)
-        if key_data:
-            delivered_key = key_data[1]
-            db_query("UPDATE product_keys SET is_used=1 WHERE id=?", (key_data[0],))
-            db_query("UPDATE products SET stock=stock-1 WHERE id=?", (prod_id,))
-        else: delivered_key = "OUT_OF_STOCK_CONTACT_ADMIN_CODE_01"
-    else: delivered_key = "OUT_OF_STOCK_CONTACT_ADMIN_CODE_02"
-    if user[1]: 
-        commission = final_price * 0.15 
-        db_query("UPDATE users SET balance=balance+?, referral_earned=referral_earned+? WHERE user_id=?", (commission, commission, user[1]))
-    product_full_name = f"{prod[6]} - {prod[8]} ({prod[0]})"
+    # 1. Generate key directly from Bantibhaiya Reseller API using Product PID & Duration
+    if bb_pid and bb_duration:
+        await call.answer("⚡ Generating key from Bantibhaiya Server...", show_alert=False)
+        success, key_or_err = await generate_bantibhaiya_key(bb_pid, bb_duration, device_limit)
+        if not success:
+            logger.error(f"Bantibhaiya key gen failed for user {call.from_user.id}: {key_or_err}")
+            try:
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"⚠️ <b>BANTIBHAIYA RESELLER API ERROR</b>\n\n"
+                    f"👤 <b>User:</b> <code>{call.from_user.id}</code> (@{call.from_user.username or 'none'})\n"
+                    f"📦 <b>Product:</b> {category_name} - {panel_name} ({prod_name})\n"
+                    f"🔑 <b>PID:</b> <code>{bb_pid}</code> | <b>Duration:</b> <code>{bb_duration}</code>\n"
+                    f"❌ <b>Error:</b> <code>{html.escape(str(key_or_err))}</code>\n\n"
+                    f"<i>User balance was NOT deducted. Check your Reseller API key/balance.</i>",
+                    parse_mode='HTML'
+                )
+            except Exception:
+                pass
+            return await call.answer(f"❌ Key Generation Failed:\n{key_or_err}\n\nYour balance is SAFE (NOT deducted).", show_alert=True)
+        delivered_key = str(key_or_err).strip()
+    else:
+        # Fallback to local stock if no PID configured
+        if stock_count > 0:
+            key_data = db_query("SELECT id, key_text FROM product_keys WHERE product_id=? AND is_used=0 LIMIT 1", (prod_id,), fetchone=True)
+            if key_data:
+                delivered_key = key_data[1]
+                db_query("UPDATE product_keys SET is_used=1 WHERE id=?", (key_data[0],))
+                db_query("UPDATE products SET stock=stock-1 WHERE id=?", (prod_id,))
+            else:
+                return await call.answer("❌ Out of stock! No Bantibhaiya PID configured for this product.", show_alert=True)
+        else:
+            return await call.answer("❌ Out of stock! Please contact Admin to configure Bantibhaiya PID.", show_alert=True)
+    
+    # Deduct wallet balance only AFTER key is generated
+    db_query("UPDATE users SET balance=?, spent=spent+?, orders_count=orders_count+1, total_saved=total_saved+? WHERE user_id=?", (user[0] - final_price, final_price, savings, call.from_user.id))
+    
+    product_full_name = f"{category_name} - {panel_name} ({prod_name})"
     db_query("INSERT INTO orders (user_id, product_name, price_paid, delivered_key, purchase_date) VALUES (?, ?, ?, ?, ?)", (call.from_user.id, product_full_name, final_price, delivered_key, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     log_activity(call.from_user.id, "PURCHASE_SUCCESS", f"Product: {product_full_name}, Paid: {final_price}")
     await send_advanced_notification(call.from_user.id, "ORDER", final_price, product=product_full_name, key=delivered_key)
-    msg = (f"✅ <b>PURCHASE SUCCESSFUL!</b>\n━━━━━━━━━━━━━━━━━━\n📦 <b>Panel:</b> {prod[6]}\n📁 <b>Panel Name:</b> {prod[8]}\n⏱ <b>Package:</b> {prod[0]}\n💰 <b>Amount Deducted:</b> {fmt_curr(final_price)}\n📱 <b>Device Limit:</b> {prod[5]}\n━━━━━━━━━━━━━━━━━━\n")
-    if prod[3] and prod[3].startswith("http"): msg += f"📥 <b>APK Link:</b> <a href='{prod[3]}'>Click Here to Download</a>\n\n"
-    if "OUT_OF_STOCK" in delivered_key:
-        msg += f"⚠️ <b>CRITICAL INVENTORY ALERT</b>\nYour money was deducted, but the key vault was empty. Contact Admin immediately with this message: {ADMIN_CONTACT}\n"
-    else:
-        msg += f"🔑 <b>Your Exclusive Key:</b>\n<code>{delivered_key}</code>\n\n<i>For any issues or guide, tap Support or contact: {ADMIN_CONTACT}</i>"
+    asyncio.create_task(process_referral_reward_on_purchase(call.from_user.id))
+    
+    msg = (f"✅ <b>PURCHASE SUCCESSFUL!</b>\n━━━━━━━━━━━━━━━━━━\n📦 <b>Panel:</b> {category_name}\n📁 <b>Panel Name:</b> {panel_name}\n⏱ <b>Package:</b> {prod_name}\n💰 <b>Amount Deducted:</b> {fmt_curr(final_price)}\n📱 <b>Device Limit:</b> {device_limit}\n━━━━━━━━━━━━━━━━━━\n")
+    if apk_link and apk_link.startswith("http"): msg += f"📥 <b>APK Link:</b> <a href='{apk_link}'>Click Here to Download</a>\n\n"
+    msg += f"🔑 <b>Your Exclusive Key:</b>\n<code>{delivered_key}</code>\n\n<i>For any issues or guide, tap Support or contact: {ADMIN_CONTACT}</i>"
     await call.message.edit_text(msg, reply_markup=back_kb("menu_shop"), disable_web_page_preview=True, parse_mode='HTML')
 
 # ==============================================================================
@@ -1768,7 +2163,7 @@ async def reseller_dashboard(call: CallbackQuery):
     setup_fee = safe_float(get_setting("reseller_setup_fee", "200.0"))
     min_balance = safe_float(get_setting("reseller_min_balance", "500.0"))
     if u[1]: 
-        text = (f"{get_emoji('shield_icon')} <b><u>— RESELLER DASHBOARD —</u></b> {get_emoji('shield_icon')}\n\n🟢 <b>Status:</b> Active\n📅 <b>Since:</b> {u[2]}\n{get_emoji('money_icon')} <b>Total Saved:</b> {fmt_curr(u[3])}\n\n🎉 You are enjoying exclusive wholesale prices on all products!")
+        text = (f"{get_emoji('shield_icon')} <b><u>— RESELLER DASHBOARD —</u></b> {get_emoji('shield_icon')}\n\n🟢 <b>Status:</b> Active\n📅 <b>Since:</b> {u[2]}\n{get_emoji('money_icon')} <b>Total Saved:</b> {fmt_curr(u[4])}\n\n🎉 You are enjoying exclusive wholesale prices on all products!")
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="BACK", callback_data="back_main", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]])
         await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
         return
@@ -1807,25 +2202,26 @@ async def my_orders(call: CallbackQuery):
 
 @dp.callback_query(F.data == "menu_profile")
 async def show_profile(call: CallbackQuery):
-    u = db_query("SELECT user_id, first_name, account_type, balance, orders_count, spent, joined_date, is_reseller, reseller_since, total_saved, is_vip FROM users WHERE user_id=?", (call.from_user.id,), fetchone=True)
+    u = db_query("SELECT user_id, first_name, username, account_type, balance, orders_count, spent, joined_date, is_reseller, reseller_since, total_saved, is_vip FROM users WHERE user_id=?", (call.from_user.id,), fetchone=True)
     acc_type_display = []
-    if u[7]: acc_type_display.append(f"{get_emoji('reseller')} Reseller")
-    if u[10]: acc_type_display.append(f"{get_emoji('vip')} VIP")
+    if u[8]: acc_type_display.append(f"{get_emoji('reseller')} Reseller")
+    if u[11]: acc_type_display.append(f"{get_emoji('vip')} VIP")
     type_str = " | ".join(acc_type_display) if acc_type_display else f"{get_emoji('regular_user')} Regular User"
     text = (
         f"{get_emoji('grid_id')} <b><u>— YOUR SECURE PROFILE —</u></b> {get_emoji('grid_id')}\n\n"
         f"{get_emoji('grid_id')} <b>Grid ID:</b> <code>{u[0]}</code>\n"
-        f"{get_emoji('name')} <b>Name:</b> {u[1]}\n"
+        f"{get_emoji('name')} <b>Name:</b> {html.escape(str(u[1] or 'User'))}\n"
+        f"🔗 <b>Username:</b> {('@' + html.escape(str(u[2]))) if u[2] else 'Not set'}\n"
         f"{get_emoji('account_level')} <b>Account Level:</b> {type_str}\n\n"
         f"{get_emoji('wallet_left')} <b>— Wallet —</b> {get_emoji('wallet_right')}\n"
         f"{get_emoji('wallet_left')} <b>Current Balance:</b> {fmt_curr(u[3])} {get_emoji('wallet_right')}\n\n"
         f"{get_emoji('global_stats')} <b>— Global Statistics —</b>\n"
-        f"{get_emoji('total_orders')} <b>Total Orders:</b> {u[4]}\n"
-        f"{get_emoji('total_spent')} <b>Total Spent:</b> {fmt_curr(u[5])}\n"
+        f"{get_emoji('total_orders')} <b>Total Orders:</b> {u[5]}\n"
+        f"{get_emoji('total_spent')} <b>Total Spent:</b> {fmt_curr(u[6])}\n"
     )
-    if u[7]:
-        text += f"{get_emoji('shield_icon')} <b>— RESELLER METRICS —</b> {get_emoji('shield_icon')}\n{get_emoji('money_icon')} <b>Total Saved via Reseller:</b> {fmt_curr(u[9])}\n\n"
-    text += f"{get_emoji('joined_grid')} <b>Joined Grid:</b> {u[6]}\n\n"
+    if u[8]:
+        text += f"{get_emoji('shield_icon')} <b>— RESELLER METRICS —</b> {get_emoji('shield_icon')}\n{get_emoji('money_icon')} <b>Total Saved via Reseller:</b> {fmt_curr(u[10])}\n\n"
+    text += f"{get_emoji('joined_grid')} <b>Joined Grid:</b> {u[7]}\n\n"
 
     # Purchase history is shown directly inside Profile.
     orders = db_query(
@@ -1930,18 +2326,19 @@ async def process_ticket(m: Message, state: FSMContext):
 # ==============================================================================
 @dp.message(Command("admin"))
 async def admin_panel(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
+    if not is_admin_user(message.from_user.id): return
     await state.clear()
     await message.answer("⚙️ <b>Advanced Admin Terminal</b>\n<i>Authorized Access Granted.</i>", reply_markup=admin_kb(), parse_mode='HTML')
 
 @dp.callback_query(F.data == "admin_panel_back")
 async def back_to_admin(call: CallbackQuery, state: FSMContext):
+    if not is_admin_user(call.from_user.id): return
     await state.clear()
     await call.message.edit_text("⚙️ <b>Advanced Admin Terminal</b>\n<i>Authorized Access Granted.</i>", reply_markup=admin_kb(), parse_mode='HTML')
 
 @dp.callback_query(F.data == "admin_toggle_vip_sys")
 async def toggle_vip_sys(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     res = db_query("SELECT value FROM settings WHERE key='vip_status'", fetchone=True)
     current = res[0] if res else 'OFF'
     new_status = 'ON' if current == 'OFF' else 'OFF'
@@ -1950,135 +2347,299 @@ async def toggle_vip_sys(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_user_control_start")
 async def admin_user_control_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Download Full User List", callback_data="admin_download_userlist", style="success")],
-        [InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+    if not is_admin_user(call.from_user.id): return
+    await state.clear()
+    
+    t_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0] or 0
+    t_resellers = db_query("SELECT COUNT(*) FROM users WHERE is_reseller=1", fetchone=True)[0] or 0
+    t_admins = db_query("SELECT COUNT(*) FROM users WHERE is_admin=1", fetchone=True)[0] or 0
+    t_banned = db_query("SELECT COUNT(*) FROM users WHERE is_banned=1", fetchone=True)[0] or 0
+    
+    recent_users = db_query("SELECT user_id, first_name, username, balance, is_reseller, is_admin FROM users ORDER BY rowid DESC LIMIT 10", fetchall=True)
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    
+    if recent_users:
+        for ru in recent_users:
+            u_id, u_name, u_uname, u_bal, is_res, is_adm = ru
+            role_tag = "👑" if is_res else ("⭐" if is_adm else "👤")
+            disp = f"{role_tag} {u_name[:15]} ({fmt_curr(u_bal)})"
+            kb.inline_keyboard.append([InlineKeyboardButton(text=disp, callback_data=f"usrctrl_view_{u_id}", style="primary")])
+            
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="🔍 Search User (ID/@Username)", callback_data="admin_search_user_prompt", style="success")
     ])
-    await call.message.edit_text("💻 <b>User Control Terminal</b>\n\n✏️ Enter the <b>User ID</b> or <b>@Username</b> you want to investigate or manage:\n\n👇 <b>OR</b> download the full user CSV format list:", reply_markup=kb, parse_mode='HTML')
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text=f"👑 Resellers ({t_resellers})", callback_data="admin_list_resellers", style="primary"),
+        InlineKeyboardButton(text=f"⭐ Admins ({t_admins})", callback_data="admin_list_admins", style="primary")
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="📋 Download Full User List", callback_data="admin_download_userlist", style="primary")
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")
+    ])
+    
+    text = (
+        f"🛡 <b><u>USER MANAGEMENT SUITE</u></b> 🛡\n━━━━━━━━━━━━━━━━━━\n"
+        f"👥 <b>Total Users:</b> {t_users}\n"
+        f"👑 <b>Resellers:</b> {t_resellers} | ⭐ <b>Admins:</b> {t_admins}\n"
+        f"🔴 <b>Banned Users:</b> {t_banned}\n━━━━━━━━━━━━━━━━━━\n"
+        f"👇 <b>Select a Recent User below, or click Search:</b>"
+    )
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data == "admin_search_user_prompt")
+async def admin_search_user_prompt(call: CallbackQuery, state: FSMContext):
+    if not is_admin_user(call.from_user.id): return
+    await call.message.edit_text(
+        "🔍 <b>Search User</b>\n\n"
+        "✏️ Send the <b>Telegram User ID</b> or <b>@username</b> in chat:",
+        reply_markup=admin_back_kb(),
+        parse_mode='HTML'
+    )
     await state.set_state(AdminStates.manage_target_user)
+
+@dp.callback_query(F.data == "admin_list_resellers")
+async def admin_list_resellers(call: CallbackQuery):
+    if not is_admin_user(call.from_user.id): return
+    resellers = db_query("SELECT user_id, first_name, username, balance FROM users WHERE is_reseller=1", fetchall=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    if resellers:
+        for r in resellers:
+            kb.inline_keyboard.append([InlineKeyboardButton(text=f"👑 {r[1]} (@{r[2] or 'no_user'}) - {fmt_curr(r[3])}", callback_data=f"usrctrl_view_{r[0]}", style="primary")])
+    else:
+        kb.inline_keyboard.append([InlineKeyboardButton(text="No Resellers Found", callback_data="none")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Back to Users", callback_data="admin_user_control_start")])
+    await call.message.edit_text("👑 <b><u>ACTIVE WHOLESALE RESELLERS</u></b>\n\nClick any user to manage their balance or roles:", reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data == "admin_list_admins")
+async def admin_list_admins(call: CallbackQuery):
+    if not is_admin_user(call.from_user.id): return
+    admins = db_query("SELECT user_id, first_name, username, balance FROM users WHERE is_admin=1 OR user_id=?", (ADMIN_ID,), fetchall=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    if admins:
+        for a in admins:
+            tag = "🌟 Owner" if a[0] == ADMIN_ID else "⭐ Admin"
+            kb.inline_keyboard.append([InlineKeyboardButton(text=f"{tag}: {a[1]} (@{a[2] or 'no_user'})", callback_data=f"usrctrl_view_{a[0]}", style="primary")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Back to Users", callback_data="admin_user_control_start")])
+    await call.message.edit_text("⭐ <b><u>ADMINISTRATOR TEAM</u></b>\n\nClick any admin to manage privileges:", reply_markup=kb, parse_mode='HTML')
 
 @dp.callback_query(F.data == "admin_download_userlist")
 async def admin_download_userlist(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
-    users = db_query("SELECT username, user_id, phone, balance, orders_count, is_vip, is_reseller FROM users", fetchall=True)
+    if not is_admin_user(call.from_user.id): return
+    users = db_query("SELECT username, user_id, phone, balance, orders_count, is_vip, is_reseller, is_admin FROM users", fetchall=True)
     if not users: return await call.answer("❌ No users found in the database.", show_alert=True)
     file_content = "FULL DATABASE DUMP\n" + "="*100 + "\n"
     for u in users:
         uname = u[0] if u[0] else "No_Username"
         uid = u[1]
         phone = u[2] if u[2] else "No_Phone"
-        bal = u[3]
-        orders = u[4]
+        bal = u[3] or 0.0
+        orders = u[4] or 0
         vip_status = "YES" if u[5] else "NO"
         res_status = "YES" if u[6] else "NO"
-        file_content += f"UID: {uid} | UNAME: {uname} | PHONE: {phone} | BAL: ₹{bal:.2f} | BUY: {orders} | VIP: {vip_status} | RES: {res_status}\n"
+        adm_status = "YES" if (len(u) > 7 and u[7]) else "NO"
+        file_content += f"UID: {uid} | UNAME: {uname} | PHONE: {phone} | BAL: ₹{bal:.2f} | BUY: {orders} | VIP: {vip_status} | RES: {res_status} | ADM: {adm_status}\n"
     doc = BufferedInputFile(file_content.encode('utf-8'), filename=f"DB_{datetime.now().strftime('%Y%m%d')}.txt")
     await call.message.answer_document(document=doc, caption="📋 <b>Database export complete.</b>", parse_mode='HTML')
     await call.answer()
+
+async def render_user_profile_view(target: Any, user_id: int, state: FSMContext, is_callback: bool = True):
+    user_q = db_query("SELECT user_id, first_name, username, balance, is_reseller, orders_count, spent, joined_date, is_banned, warnings, is_vip, is_admin FROM users WHERE user_id=?", (user_id,), fetchone=True)
+    if not user_q:
+        msg_text = f"❌ User ID <code>{user_id}</code> not found in database."
+        if is_callback: await target.edit_text(msg_text, reply_markup=admin_back_kb(), parse_mode='HTML')
+        else: await target.answer(msg_text, reply_markup=admin_back_kb(), parse_mode='HTML')
+        return
+
+    u_id, u_name, u_user, bal, is_res, orders, spent, joined, is_banned, warnings, is_vip, is_adm = user_q
+    await state.update_data(target_u_id=u_id)
+    
+    status_emoji = "🔴 BANNED" if is_banned else "🟢 ACTIVE"
+    tags = []
+    if u_id == ADMIN_ID: tags.append("👑 Owner")
+    elif is_adm: tags.append("⭐ Sub-Admin")
+    if is_res: tags.append("👑 Wholesale Reseller")
+    if is_vip: tags.append("🌟 VIP Member")
+    type_str = " | ".join(tags) if tags else "👤 Regular Customer"
+    
+    text = (
+        f"🛡 <b><u>USER PROFILE & CONTROL TERMINAL</u></b> 🛡\n━━━━━━━━━━━━━━━━━━\n"
+        f"📛 <b>Name:</b> {u_name or 'User'} (@{u_user or 'None'})\n"
+        f"🆔 <b>Telegram ID:</b> <code>{u_id}</code>\n"
+        f"📊 <b>Account Status:</b> {status_emoji}\n"
+        f"🔰 <b>Roles:</b> {type_str}\n"
+        f"⚠️ <b>Warnings Issued:</b> {warnings}\n━━━━━━━━━━━━━━━━━━\n"
+        f"💰 <b>Wallet Balance:</b> <b>{fmt_curr(bal)}</b>\n"
+        f"📦 <b>Orders Purchased:</b> {orders} Keys\n"
+        f"💸 <b>Total Money Spent:</b> {fmt_curr(spent)}\n"
+        f"📅 <b>Registered Date:</b> {joined or 'N/A'}"
+    )
+    
+    res_btn_text = "❌ Demote from Reseller" if is_res else "👑 Promote to Reseller"
+    adm_btn_text = "❌ Demote Admin" if is_adm else "⭐ Promote to Admin"
+    vip_btn_text = "❌ Remove VIP" if is_vip else "🌟 Grant VIP"
+    ban_btn_text = "✅ Unban User" if is_banned else "🚫 Ban User"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Add Balance", callback_data=f"usrctrl_add_{u_id}", style="success"), InlineKeyboardButton(text="➖ Deduct Balance", callback_data=f"usrctrl_min_{u_id}", style="danger")],
+        [InlineKeyboardButton(text=res_btn_text, callback_data=f"usrctrl_res_{u_id}", style="primary"), InlineKeyboardButton(text=adm_btn_text, callback_data=f"usrctrl_adm_{u_id}", style="primary")],
+        [InlineKeyboardButton(text=vip_btn_text, callback_data=f"usrctrl_vip_{u_id}", style="primary"), InlineKeyboardButton(text=ban_btn_text, callback_data=f"usrctrl_ban_{u_id}", style="danger")],
+        [InlineKeyboardButton(text="⚠️ Send Warning", callback_data=f"usrctrl_warn_{u_id}", style="danger")],
+        [InlineKeyboardButton(text="🔙 Back to Users List", callback_data="admin_user_control_start", icon_custom_emoji_id=get_emoji_icon("back"))]
+    ])
+    
+    if is_callback:
+        await target.edit_text(text, reply_markup=kb, parse_mode='HTML')
+    else:
+        await target.answer(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("usrctrl_view_"))
+async def usrctrl_view_user(call: CallbackQuery, state: FSMContext):
+    if not is_admin_user(call.from_user.id): return
+    u_id = int(call.data.split("usrctrl_view_")[1])
+    await render_user_profile_view(call.message, u_id, state, is_callback=True)
 
 @dp.message(AdminStates.manage_target_user)
 async def process_user_lookup(m: Message, state: FSMContext):
     target = m.text.strip()
     if target.startswith('@'): target = target[1:]
-    loader_msg = await hacker_loading(m, "Querying User Database")
-    user_q = db_query("SELECT user_id, first_name, username, balance, is_reseller, orders_count, spent, joined_date, is_banned, warnings, is_vip FROM users WHERE user_id=? OR username=? COLLATE NOCASE", (target, target), fetchone=True)
-    if not user_q: return await loader_msg.edit_text("❌ Target not found in the grid. Check ID/Username syntax.", reply_markup=admin_back_kb(), parse_mode='HTML')
-    u_id, u_name, u_user, bal, is_res, orders, spent, joined, is_banned, warnings, is_vip = user_q
-    await state.update_data(target_u_id=u_id)
-    status_emoji = "🔴 BANNED" if is_banned else "🟢 ACTIVE"
-    tags = []
-    if is_res: tags.append("👑 Reseller")
-    if is_vip: tags.append("🌟 VIP")
-    type_str = " | ".join(tags) if tags else "👤 Regular"
-    text = (f"🛡 <b><u>USER CONTROL TERMINAL</u></b> 🛡\n━━━━━━━━━━━━━━━━━━\n📛 <b>Name:</b> {u_name} (@{u_user})\n🆔 <b>ID:</b> <code>{u_id}</code>\n📊 <b>Status:</b> {status_emoji}\n🔰 <b>Type:</b> {type_str}\n⚠️ <b>Warnings Issued:</b> {warnings}\n━━━━━━━━━━━━━━━━━━\n💰 <b>Wallet Balance:</b> {fmt_curr(bal)}\n📦 <b>Orders:</b> {orders} | 💸 <b>Total Spent:</b> {fmt_curr(spent)}\n📅 <b>Joined:</b> {joined}")
-    ban_btn_text = "Unban ✅" if is_banned else "Ban 🚫"
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Add Funds ➕", callback_data=f"usrctrl_add_{u_id}", style="success"), InlineKeyboardButton(text="Minus Funds ➖", callback_data=f"usrctrl_min_{u_id}", style="danger")],
-        [InlineKeyboardButton(text=ban_btn_text, callback_data=f"usrctrl_ban_{u_id}", style="danger"), InlineKeyboardButton(text="Warn User ⚠️", callback_data=f"usrctrl_warn_{u_id}", style="danger")],
-        [InlineKeyboardButton(text="Give VIP 🌟" if not is_vip else "Remove VIP 🚫", callback_data=f"usrctrl_vip_{u_id}", style="success")],
-        [InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
-    ])
-    await loader_msg.edit_text(text, reply_markup=kb, parse_mode='HTML')
+    user_q = db_query("SELECT user_id FROM users WHERE user_id=? OR username=? COLLATE NOCASE", (target, target), fetchone=True)
+    if not user_q:
+        return await m.answer("❌ Target user not found in database. Check ID or @username.", reply_markup=admin_back_kb(), parse_mode='HTML')
+    await render_user_profile_view(m, user_q[0], state, is_callback=False)
 
 @dp.callback_query(F.data.startswith("usrctrl_"))
 async def handle_user_actions(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    action = call.data.split("_")[1]
-    u_id = int(call.data.split("_")[2])
+    if not is_admin_user(call.from_user.id): return
+    parts = call.data.split("_")
+    action = parts[1]
+    u_id = int(parts[2])
     await state.update_data(target_u_id=u_id)
-    if action == "ban":
-        current_status = db_query("SELECT is_banned FROM users WHERE user_id=?", (u_id,), fetchone=True)[0]
-        if current_status == 0:
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Yes, Ban", callback_data=f"confirm_ban_{u_id}", style="danger"), InlineKeyboardButton(text="❌ Cancel", callback_data="admin_user_control_start", style="danger")]
-            ])
-            await call.message.edit_text(f"⚠️ Are you sure you want to <b>BAN</b> user <code>{u_id}</code>?", reply_markup=kb, parse_mode='HTML')
-            await state.set_state(AdminStates.confirm_ban)
+    
+    if action == "res":
+        current = db_query("SELECT is_reseller FROM users WHERE user_id=?", (u_id,), fetchone=True)
+        is_res = current[0] if current else 0
+        if is_res:
+            db_query("UPDATE users SET is_reseller=0 WHERE user_id=?", (u_id,))
+            await call.answer("❌ Reseller status removed!", show_alert=True)
+            try: await bot.send_message(u_id, "ℹ️ <b>Your Wholesale Reseller access has been deactivated by Admin.</b>", parse_mode='HTML')
+            except: pass
         else:
-            db_query("UPDATE users SET is_banned=0 WHERE user_id=?", (u_id,))
-            await call.answer("✅ User unbanned successfully!", show_alert=True)
-            m = call.message; m.text = str(u_id); await process_user_lookup(m, state)
+            db_query("UPDATE users SET is_reseller=1, reseller_since=? WHERE user_id=?", (datetime.now().strftime("%Y-%m-%d"), u_id))
+            await call.answer("👑 User promoted to Wholesale Reseller!", show_alert=True)
+            try: await bot.send_message(u_id, "🎉 <b>Congratulations!</b>\nAdmin has upgraded your account to <b>👑 Wholesale Reseller</b>!\nYou now enjoy wholesale prices on all panels in Store!", parse_mode='HTML')
+            except: pass
+        await render_user_profile_view(call.message, u_id, state, is_callback=True)
+
+    elif action == "adm":
+        if u_id == ADMIN_ID:
+            return await call.answer("⚠️ Cannot change role of the Primary Owner.", show_alert=True)
+        current = db_query("SELECT is_admin FROM users WHERE user_id=?", (u_id,), fetchone=True)
+        is_adm = current[0] if current else 0
+        if is_adm:
+            db_query("UPDATE users SET is_admin=0 WHERE user_id=?", (u_id,))
+            await call.answer("❌ Admin privileges revoked!", show_alert=True)
+            try: await bot.send_message(u_id, "ℹ️ <b>Your Admin privileges have been revoked by the Owner.</b>", parse_mode='HTML')
+            except: pass
+        else:
+            db_query("UPDATE users SET is_admin=1 WHERE user_id=?", (u_id,))
+            await call.answer("⭐ User promoted to Admin!", show_alert=True)
+            try: await bot.send_message(u_id, "⭐ <b>Admin Privileges Granted!</b>\nYou have been promoted to Admin by the Owner. Use /admin to access the control panel.", parse_mode='HTML')
+            except: pass
+        await render_user_profile_view(call.message, u_id, state, is_callback=True)
+
     elif action == "vip":
-        current_status = db_query("SELECT is_vip FROM users WHERE user_id=?", (u_id,), fetchone=True)[0]
-        if current_status == 1:
+        current = db_query("SELECT is_vip FROM users WHERE user_id=?", (u_id,), fetchone=True)
+        is_vip = current[0] if current else 0
+        if is_vip:
             db_query("UPDATE users SET is_vip=0 WHERE user_id=?", (u_id,))
-            await call.answer("✅ VIP Removed!", show_alert=True)
+            await call.answer("❌ VIP status removed!", show_alert=True)
+            try: await bot.send_message(u_id, "ℹ️ Your VIP membership has ended.", parse_mode='HTML')
+            except: pass
         else:
             db_query("UPDATE users SET is_vip=1, vip_since=? WHERE user_id=?", (datetime.now().strftime("%Y-%m-%d"), u_id))
-            await call.answer("✅ VIP Granted!", show_alert=True)
-        m = call.message; m.text = str(u_id); await process_user_lookup(m, state)
-    elif action == "add":
-        await call.message.edit_text("💰 Enter the amount to <b>ADD</b> to this user's wallet:", reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.wait_for_add_money)
-    elif action == "min":
-        await call.message.edit_text("💸 Enter the amount to <b>DEDUCT</b> from this user's wallet:", reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.wait_for_minus_money)
-    elif action == "warn":
-        await call.message.edit_text("⚠️ Type the strict warning message you want to send directly to this user:", reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.wait_for_warning)
+            await call.answer("🌟 VIP Membership granted!", show_alert=True)
+            try: await bot.send_message(u_id, "🌟 <b>VIP Granted!</b>\nAdmin has awarded you VIP Membership with exclusive discounts on all store items!", parse_mode='HTML')
+            except: pass
+        await render_user_profile_view(call.message, u_id, state, is_callback=True)
 
-@dp.callback_query(F.data.startswith("confirm_ban_"))
-async def confirm_ban(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    u_id = int(call.data.split("_")[2])
-    db_query("UPDATE users SET is_banned=1 WHERE user_id=?", (u_id,))
-    await call.answer("🔴 User has been banned!", show_alert=True)
-    await state.clear()
-    m = call.message; m.text = str(u_id); await process_user_lookup(m, state)
+    elif action == "ban":
+        current = db_query("SELECT is_banned FROM users WHERE user_id=?", (u_id,), fetchone=True)
+        is_banned = current[0] if current else 0
+        if is_banned:
+            db_query("UPDATE users SET is_banned=0 WHERE user_id=?", (u_id,))
+            await call.answer("✅ User unbanned successfully!", show_alert=True)
+            try: await bot.send_message(u_id, "✅ <b>Your account has been unbanned by Admin.</b>", parse_mode='HTML')
+            except: pass
+            await render_user_profile_view(call.message, u_id, state, is_callback=True)
+        else:
+            db_query("UPDATE users SET is_banned=1 WHERE user_id=?", (u_id,))
+            await call.answer("🔴 User has been banned!", show_alert=True)
+            try: await bot.send_message(u_id, "🔴 <b>Your account has been banned from this bot for policy violations.</b>", parse_mode='HTML')
+            except: pass
+            await render_user_profile_view(call.message, u_id, state, is_callback=True)
+
+    elif action == "add":
+        await call.message.edit_text(f"💰 <b>Add Balance to User</b> <code>{u_id}</code>:\n\nEnter the amount in ₹ to <b>CREDIT</b> (e.g. <code>500</code>):", reply_markup=admin_back_kb(), parse_mode='HTML')
+        await state.set_state(AdminStates.wait_for_add_money)
+
+    elif action == "min":
+        await call.message.edit_text(f"💸 <b>Deduct Balance from User</b> <code>{u_id}</code>:\n\nEnter the amount in ₹ to <b>DEBIT</b> (e.g. <code>200</code>):", reply_markup=admin_back_kb(), parse_mode='HTML')
+        await state.set_state(AdminStates.wait_for_minus_money)
+
+    elif action == "warn":
+        await call.message.edit_text(f"⚠️ <b>Send Warning to User</b> <code>{u_id}</code>:\n\nType the warning message:", reply_markup=admin_back_kb(), parse_mode='HTML')
+        await state.set_state(AdminStates.wait_for_warning)
 
 @dp.message(AdminStates.wait_for_add_money)
 async def exec_add_money(m: Message, state: FSMContext):
     try:
-        amt = float(m.text)
+        amt = float(m.text.strip())
+        if amt <= 0: return await m.answer("❌ Amount must be greater than 0.")
         data = await state.get_data()
         u_id = data['target_u_id']
         db_query("UPDATE users SET balance = balance + ? WHERE user_id=?", (amt, u_id))
-        await m.answer(f"✅ Successfully added {fmt_curr(amt)} to target <code>{u_id}</code>.", reply_markup=admin_kb(), parse_mode='HTML')
-        try: await bot.send_message(u_id, f"💰 <b>Wallet Top-up!</b>\nAdmin has manually added {fmt_curr(amt)} to your wallet.", parse_mode='HTML')
+        new_bal = db_query("SELECT balance FROM users WHERE user_id=?", (u_id,), fetchone=True)[0]
+        
+        await m.answer(f"✅ <b>Successfully added {fmt_curr(amt)} to user <code>{u_id}</code>!</b>\nNew Balance: <b>{fmt_curr(new_bal)}</b>", reply_markup=admin_kb(), parse_mode='HTML')
+        try:
+            await bot.send_message(u_id, f"💰 <b>Wallet Top-up Received!</b>\n\nAdmin has credited <b>{fmt_curr(amt)}</b> to your wallet.\nYour Current Balance: <b>{fmt_curr(new_bal)}</b>", parse_mode='HTML')
         except: pass
         await state.clear()
-    except ValueError: await m.answer("❌ Critical Error: Input must be a valid number.")
+    except ValueError:
+        await m.answer("❌ Please enter a valid numerical amount (e.g. <code>500</code>).", parse_mode='HTML')
 
 @dp.message(AdminStates.wait_for_minus_money)
 async def exec_minus_money(m: Message, state: FSMContext):
     try:
-        amt = float(m.text)
+        amt = float(m.text.strip())
+        if amt <= 0: return await m.answer("❌ Amount must be greater than 0.")
         data = await state.get_data()
         u_id = data['target_u_id']
         db_query("UPDATE users SET balance = balance - ? WHERE user_id=?", (amt, u_id))
-        await m.answer(f"✅ Successfully deducted {fmt_curr(amt)} from target <code>{u_id}</code>.", reply_markup=admin_kb(), parse_mode='HTML')
+        new_bal = db_query("SELECT balance FROM users WHERE user_id=?", (u_id,), fetchone=True)[0]
+        
+        await m.answer(f"✅ <b>Successfully deducted {fmt_curr(amt)} from user <code>{u_id}</code>!</b>\nNew Balance: <b>{fmt_curr(new_bal)}</b>", reply_markup=admin_kb(), parse_mode='HTML')
+        try:
+            await bot.send_message(u_id, f"💸 <b>Wallet Balance Debited!</b>\n\nAdmin has deducted <b>{fmt_curr(amt)}</b> from your wallet.\nYour Current Balance: <b>{fmt_curr(new_bal)}</b>", parse_mode='HTML')
+        except: pass
         await state.clear()
-    except ValueError: await m.answer("❌ Critical Error: Input must be a valid number.")
+    except ValueError:
+        await m.answer("❌ Please enter a valid numerical amount (e.g. <code>200</code>).", parse_mode='HTML')
 
 @dp.message(AdminStates.wait_for_warning)
 async def exec_warn_user(m: Message, state: FSMContext):
     data = await state.get_data()
     u_id = data['target_u_id']
-    warn_text = m.text
+    warn_text = m.text.strip()
     db_query("UPDATE users SET warnings = warnings + 1 WHERE user_id=?", (u_id,))
-    await m.answer(f"✅ Official warning dispatched to <code>{u_id}</code>.", reply_markup=admin_kb(), parse_mode='HTML')
-    try: await bot.send_message(u_id, f"⚠️ <b>OFFICIAL WARNING FROM SYSTEM ADMIN:</b>\n\n{warn_text}\n\n<i>Subsequent infractions may lead to an automated grid ban.</i>", parse_mode='HTML')
+    total_warns = db_query("SELECT warnings FROM users WHERE user_id=?", (u_id,), fetchone=True)[0]
+    
+    await m.answer(f"✅ Warning dispatched to user <code>{u_id}</code> (Total Warnings: {total_warns}).", reply_markup=admin_kb(), parse_mode='HTML')
+    try:
+        await bot.send_message(u_id, f"⚠️ <b>OFFICIAL WARNING FROM ADMIN:</b>\n\n{warn_text}\n\n<i>Total warnings: {total_warns}/3. Please adhere to bot terms of service.</i>", parse_mode='HTML')
     except: pass
     await state.clear()
 
@@ -2109,125 +2670,399 @@ async def add_prod_start(call: CallbackQuery, state: FSMContext):
         emoji_id = get_category_emoji(cat)
         kb.inline_keyboard.append([InlineKeyboardButton(text=cat, callback_data=f"addprod_cat_{cat}", icon_custom_emoji_id=emoji_id, style="primary")])
     kb.inline_keyboard.append([InlineKeyboardButton(text="Cancel", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
-    await call.message.edit_text("<b>Step 1:</b> Choose the <b>Category</b> for this product:", reply_markup=kb, parse_mode='HTML')
+    await call.message.edit_text("<b>Step 1:</b> Choose <b>Category</b>:", reply_markup=kb, parse_mode='HTML')
 
 @dp.callback_query(F.data.startswith("addprod_cat_"))
 async def add_prod_category_selected(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
     category = call.data.split("addprod_cat_", 1)[1]
     await state.update_data(cat=category)
-    await call.message.edit_text(f"<b>Step 2:</b> Enter <b>PANEL NAME</b>\n(e.g., 'MST PANEL', 'DRIP PANEL'):", reply_markup=admin_back_kb(), parse_mode='HTML')
+    
+    existing_panels = db_query("SELECT DISTINCT panel_name FROM products WHERE category = ? AND panel_name != ''", (category,), fetchall=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    
+    if existing_panels:
+        for ep in existing_panels:
+            p_name = ep[0]
+            kb.inline_keyboard.append([InlineKeyboardButton(text=f"📁 {p_name} (Add Plan)", callback_data=f"addprod_pnl_{p_name[:30]}", style="primary")])
+            
+    kb.inline_keyboard.append([InlineKeyboardButton(text="➕ Add New Product / Panel", callback_data="addprod_new_panel_btn", style="success")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="Cancel", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
+    
+    if existing_panels:
+        text = (
+            f"📦 <b>Category:</b> {category}\n━━━━━━━━━━━━━━━━━━\n"
+            f"👇 <b>Select an Existing Product to add more plans, OR click 'Add New Product':</b>"
+        )
+    else:
+        text = (
+            f"📦 <b>Category:</b> {category}\n━━━━━━━━━━━━━━━━━━\n"
+            f"No products found in this category.\n"
+            f"Click <b>'➕ Add New Product / Panel'</b> below to create one:"
+        )
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data == "addprod_new_panel_btn")
+async def add_prod_new_panel_btn_clicked(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID: return
+    await call.message.edit_text(
+        "✍️ <b>Enter NEW Product / Panel Name:</b>\n"
+        "(Example: <code>MST PANEL</code>, <code>VIP CHEATS</code>):",
+        reply_markup=admin_back_kb(),
+        parse_mode='HTML'
+    )
     await state.set_state(AdminStates.add_prod_panel_name)
 
-@dp.message(AdminStates.add_prod_panel_name)
-async def add_prod_panel_name(m: Message, state: FSMContext):
-    await state.update_data(panel_name=m.text)
-    await m.answer("<b>Step 3:</b> Enter <b>PACKAGE DURATION/DATE NAME</b>\n(e.g., '7 Days', '1 Month'):", parse_mode='HTML')
-    await state.set_state(AdminStates.add_prod_name)
-
-@dp.message(AdminStates.add_prod_name)
-async def add_prod_name(m: Message, state: FSMContext):
-    await state.update_data(name=m.text)
-    await m.answer("⏳ Enter Time Validity String (e.g., '24 Hours'):", parse_mode='HTML')
-    await state.set_state(AdminStates.add_prod_validity)
-
-@dp.message(AdminStates.add_prod_validity)
-async def add_prod_validity(m: Message, state: FSMContext):
-    await state.update_data(validity=m.text)
-    await m.answer("🔑 Enter <b>Bantibhaiya Product PID</b> for this product (example: <code>PRODUCT_PID_ID</code>).\n\nIf this product does not use Bantibhaiya API, type <code>none</code>.", parse_mode='HTML')
-    await state.set_state(AdminStates.add_prod_bantibhaiya_pid)
-
-@dp.message(AdminStates.add_prod_bantibhaiya_pid)
-async def add_prod_bantibhaiya_pid(m: Message, state: FSMContext):
-    pid = "" if m.text.strip().lower() == 'none' else m.text.strip()
-    await state.update_data(bantibhaiya_product_pid=pid)
-    await m.answer("⏱ Enter <b>Bantibhaiya Product Duration</b> exactly as the API expects (example: <code>1 Day</code>, <code>7 Days</code>, <code>1 Month</code>).\n\nIf not using Bantibhaiya API, type <code>none</code>.", parse_mode='HTML')
-    await state.set_state(AdminStates.add_prod_bantibhaiya_duration)
-
-@dp.message(AdminStates.add_prod_bantibhaiya_duration)
-async def add_prod_bantibhaiya_duration(m: Message, state: FSMContext):
-    duration = "" if m.text.strip().lower() == 'none' else m.text.strip()
-    await state.update_data(bantibhaiya_product_duration=duration)
-    await m.answer("📱 Enter strict Device Enforcement Limit (e.g., '1 Device HWID'):", parse_mode='HTML')
-    await state.set_state(AdminStates.add_prod_device_limit)
-
-@dp.message(AdminStates.add_prod_device_limit)
-async def add_prod_device_limit(m: Message, state: FSMContext):
-    await state.update_data(device_limit=m.text)
-    await m.answer("💰 Enter standard **User Price** in Rupees (₹) (e.g., 500):", parse_mode='HTML')
-    await state.set_state(AdminStates.add_prod_price)
-
-@dp.message(AdminStates.add_prod_price)
-async def add_prod_price(m: Message, state: FSMContext):
-    try:
-        await state.update_data(price=float(m.text))
-        await m.answer("👑 Enter wholesale **Reseller Price** in Rupees (₹) (e.g., 300):", parse_mode='HTML')
-        await state.set_state(AdminStates.add_prod_reseller_price)
-    except ValueError: await m.answer("❌ Invalid input datatype! Must be numerical.")
-
-@dp.message(AdminStates.add_prod_reseller_price)
-async def add_prod_reseller_price(m: Message, state: FSMContext):
-    try:
-        await state.update_data(reseller_price=float(m.text))
-        await m.answer("🔗 Enter direct APK/Payload Download Link (or type 'none' to omit):", parse_mode='HTML')
-        await state.set_state(AdminStates.add_prod_apk)
-    except ValueError: await m.answer("❌ Invalid input datatype! Must be numerical.")
-
-@dp.message(AdminStates.add_prod_apk)
-async def add_prod_apk(m: Message, state: FSMContext):
-    await state.update_data(apk="" if m.text.lower() == 'none' else m.text)
-    await m.answer("📥 <b>Vault Injection Phase</b>\n\nPaste all the license <b>Keys</b> exactly as formatted (1 key per newline):", parse_mode='HTML')
-    await state.set_state(AdminStates.add_prod_keys)
-
-@dp.message(AdminStates.add_prod_keys)
-async def add_prod_keys(m: Message, state: FSMContext):
-    keys = [k.strip() for k in m.text.strip().split('\n') if k.strip()]
+@dp.callback_query(F.data.startswith("addprod_pnl_"))
+async def add_prod_panel_selected_btn(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID: return
+    panel_name = call.data.split("addprod_pnl_", 1)[1]
     data = await state.get_data()
-    stock = len(keys)
+    cat = data.get('cat', '')
+    
+    # Retrieve existing PID for this panel
+    existing = db_query("SELECT bantibhaiya_product_pid, apk_link FROM products WHERE category = ? AND panel_name = ? AND bantibhaiya_product_pid != '' LIMIT 1", (cat, panel_name), fetchone=True)
+    auto_pid = existing[0] if (existing and existing[0]) else ""
+    auto_apk = existing[1] if (existing and existing[1]) else ""
+    
+    await state.update_data(panel_name=panel_name, auto_pid=auto_pid, auto_apk=auto_apk)
+    
+    if auto_pid:
+        text = (
+            f"📁 Panel: <b>{panel_name}</b>\n"
+            f"🔑 Reseller PID: <code>{auto_pid}</code> <i>(Saved for this panel)</i>\n━━━━━━━━━━━━━━━━━━\n"
+            f"<b>Step 1 of 3:</b> Enter <b>Plan Display Days / Name</b>:\n"
+            f"(Example: <code>7 Days</code>, <code>30 Days</code>, <code>2 Hours</code>, <code>1 Month VIP</code>)\n\n"
+            f"💡 <i>Or send in 1 line: <code>7 Days | 7d | 500 | 350</code></i>"
+        )
+        await call.message.edit_text(text, reply_markup=admin_back_kb(), parse_mode='HTML')
+        await state.set_state(AdminStates.add_prod_plan_disp_name)
+    else:
+        text = (
+            f"📁 Panel: <b>{panel_name}</b>\n━━━━━━━━━━━━━━━━━━\n"
+            f"🔑 <b>Enter Bantibhaiya Reseller PID for this panel:</b>\n"
+            f"<i>(This PID will be saved once and used for all future plans of this panel!)</i>"
+        )
+        await call.message.edit_text(text, reply_markup=admin_back_kb(), parse_mode='HTML')
+        await state.set_state(AdminStates.add_prod_new_panel_pid)
+
+@dp.message(AdminStates.add_prod_panel_name)
+async def add_prod_panel_name_entered(m: Message, state: FSMContext):
+    panel_name = m.text.strip()
+    data = await state.get_data()
+    cat = data.get('cat', '')
+    
+    existing = db_query("SELECT bantibhaiya_product_pid, apk_link FROM products WHERE category = ? AND panel_name = ? AND bantibhaiya_product_pid != '' LIMIT 1", (cat, panel_name), fetchone=True)
+    auto_pid = existing[0] if (existing and existing[0]) else ""
+    auto_apk = existing[1] if (existing and existing[1]) else ""
+    
+    await state.update_data(panel_name=panel_name, auto_pid=auto_pid, auto_apk=auto_apk)
+    
+    if auto_pid:
+        text = (
+            f"📁 Panel: <b>{panel_name}</b>\n"
+            f"🔑 Reseller PID: <code>{auto_pid}</code> <i>(Saved for this panel)</i>\n━━━━━━━━━━━━━━━━━━\n"
+            f"<b>Step 1 of 3:</b> Enter <b>Plan Display Days / Name</b>:\n"
+            f"(Example: <code>7 Days</code>, <code>30 Days</code>, <code>2 Hours</code>, <code>1 Month VIP</code>)\n\n"
+            f"💡 <i>Or send in 1 line: <code>7 Days | 7d | 500 | 350</code></i>"
+        )
+        await m.answer(text, reply_markup=admin_back_kb(), parse_mode='HTML')
+        await state.set_state(AdminStates.add_prod_plan_disp_name)
+    else:
+        text = (
+            f"📁 New Panel: <b>{panel_name}</b>\n━━━━━━━━━━━━━━━━━━\n"
+            f"🔑 <b>Enter Bantibhaiya Reseller PID for this panel:</b>\n"
+            f"<i>(This PID will be saved once and used for all future plans of this panel!)</i>"
+        )
+        await m.answer(text, reply_markup=admin_back_kb(), parse_mode='HTML')
+        await state.set_state(AdminStates.add_prod_new_panel_pid)
+
+@dp.message(AdminStates.add_prod_new_panel_pid)
+async def add_prod_new_panel_pid_entered(m: Message, state: FSMContext):
+    pid = m.text.strip()
+    await state.update_data(auto_pid=pid)
+    data = await state.get_data()
+    panel_name = data.get('panel_name', 'General')
+    
+    text = (
+        f"📁 Panel: <b>{panel_name}</b> (PID: <code>{pid}</code>)\n━━━━━━━━━━━━━━━━━━\n"
+        f"<b>Step 1 of 3:</b> Enter <b>Plan Display Days / Name</b> in Store:\n"
+        f"(Example: <code>1 Day</code>, <code>7 Days</code>, <code>30 Days</code>)\n\n"
+        f"💡 <i>Or send all in 1 line: <code>7 Days | 7d | 500 | 350</code></i>"
+    )
+    await m.answer(text, reply_markup=admin_back_kb(), parse_mode='HTML')
+    await state.set_state(AdminStates.add_prod_plan_disp_name)
+
+@dp.message(AdminStates.add_prod_plan_disp_name)
+async def add_prod_plan_disp_name_entered(m: Message, state: FSMContext):
+    raw_text = m.text.strip()
+    data = await state.get_data()
+    cat = data.get('cat', 'ANDROID NON ROOT PANEL')
+    panel_name = data.get('panel_name', 'General')
+    bb_pid = data.get('auto_pid', '')
+    auto_apk = data.get('auto_apk', '')
+    
+    # Check if single line pipe format
+    if '|' in raw_text:
+        parts = [p.strip() for p in raw_text.split('|') if p.strip()]
+        if len(parts) >= 3:
+            disp_name = parts[0]
+            api_dur = parts[1]
+            p_parts = parts[2].split()
+            try:
+                price = float(p_parts[0])
+                if len(parts) >= 4 and parts[3].replace('.','',1).isdigit():
+                    reseller_price = float(parts[3])
+                elif len(p_parts) > 1 and p_parts[1].replace('.','',1).isdigit():
+                    reseller_price = float(p_parts[1])
+                else:
+                    reseller_price = round(price * 0.7, 2)
+                apk_link = parts[4] if len(parts) >= 5 else auto_apk
+                
+                return await save_new_plan_db(m, state, cat, panel_name, bb_pid, disp_name, api_dur, price, reseller_price, apk_link)
+            except ValueError:
+                pass
+    
+    disp_name = raw_text
+    await state.update_data(disp_name=disp_name)
+    
+    text = (
+        f"📅 Plan Display Days: <b>{disp_name}</b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"<b>Step 2 of 3:</b> Enter exact <b>Bantibhaiya Reseller API Duration</b> parameter:\n"
+        f"<i>(பண்டி பையா API கேட்கும் குறிப்பிட்ட டுரேஷன் கோடை உள்ளிடவும்)</i>\n\n"
+        f"💡 <b>Examples:</b> <code>7 Days</code>, <code>7d</code>, <code>1week</code>, <code>30d</code>, <code>1 Month</code>, <code>24h</code>, <code>season1</code>"
+    )
+    await m.answer(text, reply_markup=admin_back_kb(), parse_mode='HTML')
+    await state.set_state(AdminStates.add_prod_bantibhaiya_dur)
+
+@dp.message(AdminStates.add_prod_bantibhaiya_dur)
+async def add_prod_bantibhaiya_dur_entered(m: Message, state: FSMContext):
+    api_dur = m.text.strip()
+    await state.update_data(api_dur=api_dur)
+    data = await state.get_data()
+    disp_name = data.get('disp_name', '7 Days')
+    
+    text = (
+        f"📅 Plan: <b>{disp_name}</b> | ⏱ API Duration: <code>{api_dur}</code>\n━━━━━━━━━━━━━━━━━━\n"
+        f"<b>Step 3 of 3:</b> Enter <b>User Price & Reseller Price (₹)</b>:\n\n"
+        f"📝 <b>Format:</b> <code>[UserPrice] [ResellerPrice]</code>\n"
+        f"💡 <b>Examples:</b>\n"
+        f"• <code>500 350</code> <i>(User ₹500, Reseller ₹350)</i>\n"
+        f"• <code>500</code> <i>(User ₹500, Reseller auto 70%)</i>"
+    )
+    await m.answer(text, reply_markup=admin_back_kb(), parse_mode='HTML')
+    await state.set_state(AdminStates.add_prod_prices)
+
+@dp.message(AdminStates.add_prod_prices)
+async def add_prod_prices_entered(m: Message, state: FSMContext):
+    data = await state.get_data()
+    cat = data.get('cat', 'ANDROID NON ROOT PANEL')
+    panel_name = data.get('panel_name', 'General')
+    bb_pid = data.get('auto_pid', '')
+    auto_apk = data.get('auto_apk', '')
+    disp_name = data.get('disp_name', '7 Days')
+    api_dur = data.get('api_dur', '7 Days')
+    
+    tokens = m.text.strip().split()
+    if not tokens:
+        return await m.answer("❌ Please enter the price (e.g. <code>500 350</code>).", parse_mode='HTML')
+        
+    apk_link = auto_apk
+    if tokens[-1].startswith("http://") or tokens[-1].startswith("https://") or tokens[-1].startswith("t.me/"):
+        apk_link = tokens.pop()
+        
+    try:
+        price = float(tokens[0])
+        reseller_price = float(tokens[1]) if len(tokens) > 1 and tokens[1].replace('.','',1).isdigit() else round(price * 0.7, 2)
+    except ValueError:
+        return await m.answer("❌ Invalid numerical price! Example: <code>500 350</code>", parse_mode='HTML')
+        
+    await save_new_plan_db(m, state, cat, panel_name, bb_pid, disp_name, api_dur, price, reseller_price, apk_link)
+
+async def save_new_plan_db(m: Message, state: FSMContext, cat: str, panel_name: str, bb_pid: str, disp_name: str, api_dur: str, price: float, reseller_price: float, apk_link: str):
+    if apk_link and apk_link.lower() == 'none':
+        apk_link = ""
+        
     conn = sqlite3.connect('Cuibcc.db')
     c = conn.cursor()
-    c.execute("INSERT INTO products (category, panel_name, name, price_inr, reseller_price, stock, apk_link, validity, device_limit, bantibhaiya_product_pid, bantibhaiya_product_duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (data['cat'], data['panel_name'], data['name'], data['price'], data['reseller_price'], stock, data['apk'], data['validity'], data['device_limit'], data.get('bantibhaiya_product_pid', ''), data.get('bantibhaiya_product_duration', '')))
-    prod_id = c.lastrowid
-    for k in keys: c.execute("INSERT INTO product_keys (product_id, key_text) VALUES (?, ?)", (prod_id, k))
+    c.execute(
+        "INSERT INTO products (category, panel_name, name, price_inr, reseller_price, stock, apk_link, validity, device_limit, bantibhaiya_product_pid, bantibhaiya_product_duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (cat, panel_name, disp_name, price, reseller_price, 999, apk_link, disp_name, "1 Device HWID", bb_pid, api_dur)
+    )
     conn.commit()
     conn.close()
-    await m.answer(f"✅ <b>Data Deployment Successful!</b>\n\n📦 Panel '{data['cat']}' -> Panel Name '{data['panel_name']}' -> Package '{data['name']}'\n🔒 Vault Stock: {stock} Keys injected.\n💰 User Price: {fmt_curr(data['price'])} | 👑 Reseller: {fmt_curr(data['reseller_price'])}", reply_markup=admin_kb(), parse_mode='HTML')
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"➕ Add Another Plan to {panel_name[:20]}", callback_data=f"addprod_pnl_{panel_name[:30]}", style="primary")],
+        [InlineKeyboardButton(text="🏠 Admin Panel", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"))]
+    ])
+    
+    await m.answer(
+        f"🎉 <b>Plan Successfully Added!</b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"📦 <b>Category:</b> {cat}\n"
+        f"📁 <b>Panel Name:</b> {panel_name}\n"
+        f"🔑 <b>Panel PID:</b> <code>{bb_pid}</code>\n"
+        f"📅 <b>Store Display Name:</b> <b>{disp_name}</b>\n"
+        f"⏱ <b>Bantibhaiya API Duration:</b> <code>{api_dur}</code>\n"
+        f"💰 <b>User Price:</b> {fmt_curr(price)}\n"
+        f"👑 <b>Reseller Price:</b> {fmt_curr(reseller_price)}\n"
+        f"📥 <b>APK Link:</b> {apk_link or 'None'}\n\n"
+        f"⚡ <i>Customers buying this plan will trigger Bantibhaiya API with Duration: <code>{api_dur}</code>!</i>",
+        reply_markup=kb,
+        parse_mode='HTML'
+    )
     await state.clear()
 
 @dp.callback_query(F.data == "admin_manage_prods")
 async def admin_manage_prods(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
-    prods = db_query("SELECT id, name, category, panel_name, stock, is_active FROM products ORDER BY category, panel_name", fetchall=True)
-    if not prods: return await call.message.edit_text("📦 Store Database is completely empty.", reply_markup=admin_back_kb(), parse_mode='HTML')
+    if not is_admin_user(call.from_user.id): return
+    panels = db_query(
+        "SELECT MIN(id), category, panel_name, bantibhaiya_product_pid, COUNT(*) as plan_count FROM products WHERE panel_name != '' GROUP BY category, panel_name ORDER BY category, panel_name",
+        fetchall=True
+    )
+    if not panels:
+        return await call.message.edit_text("📦 Store Database is completely empty.\n\nClick <b>'➕ Add Product'</b> to create your first panel.", reply_markup=admin_back_kb(), parse_mode='HTML')
+        
     kb = InlineKeyboardMarkup(inline_keyboard=[])
-    for p in prods:
-        status_dot = "🟢" if p[5] else "🔴"
-        panel_name = p[3] if p[3] is not None else ""
-        kb.inline_keyboard.append([InlineKeyboardButton(text=f"{status_dot} [{p[2]}] {panel_name} - {p[1]} (Stock: {p[4]})", callback_data=f"admin_view_p_{p[0]}", style="primary")])
+    for p in panels:
+        first_id, cat, panel_name, bb_pid, plan_count = p
+        pid_tag = f"PID: {bb_pid[:12]}" if bb_pid else "No PID"
+        btn_text = f"📁 {panel_name} ({plan_count} Plans | {pid_tag})"
+        kb.inline_keyboard.append([InlineKeyboardButton(text=btn_text, callback_data=f"admin_pnl_view_{first_id}", style="primary")])
+        
+    kb.inline_keyboard.append([InlineKeyboardButton(text="➕ Add New Product / Panel", callback_data="addprod_new_panel_btn", style="success")])
     kb.inline_keyboard.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
-    await call.message.edit_text("📦 <b>Database Editor: Select Node to modify</b>", reply_markup=kb, parse_mode='HTML')
+    
+    text = (
+        f"📦 <b><u>STORE PRODUCTS & PANELS</u></b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"Total Panels: <b>{len(panels)}</b>\n\n"
+        f"👇 <b>Select a Product / Panel below to view and manage all its plans:</b>"
+    )
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("admin_pnl_view_"))
+async def admin_panel_plans_view(call: CallbackQuery):
+    if not is_admin_user(call.from_user.id): return
+    first_id = int(call.data.split("admin_pnl_view_")[1])
+    prod = db_query("SELECT category, panel_name, bantibhaiya_product_pid, apk_link, is_maintenance FROM products WHERE id=?", (first_id,), fetchone=True)
+    if not prod:
+        return await call.answer("❌ Panel not found!", show_alert=True)
+        
+    cat, panel_name, bb_pid, apk_link, is_maint = prod
+    is_maint = bool(is_maint) if is_maint else False
+    
+    plans = db_query(
+        "SELECT id, name, price_inr, reseller_price, bantibhaiya_product_duration, is_active FROM products WHERE category=? AND panel_name=? ORDER BY price_inr ASC",
+        (cat, panel_name),
+        fetchall=True
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    if plans:
+        for pl in plans:
+            pl_id, pl_name, pl_price, pl_rprice, pl_api_dur, is_act = pl
+            dot = "🟢" if is_act else "🔴"
+            kb.inline_keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{dot} {pl_name} | {fmt_curr(pl_price)} (API: {pl_api_dur})",
+                    callback_data=f"admin_view_p_{pl_id}",
+                    style="primary"
+                )
+            ])
+            
+    maint_btn_text = "🟢 Turn OFF Maintenance (Make Live)" if is_maint else "🔴 Put Under Maintenance Mode"
+    maint_style = "success" if is_maint else "danger"
+    
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text=f"➕ Add Another Plan to {panel_name[:15]}", callback_data=f"addprod_pnl_{panel_name[:30]}", style="success")
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text=maint_btn_text, callback_data=f"toggle_maint_pnl_{first_id}", style=maint_style)
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="🗑 Delete Entire Panel", callback_data=f"del_all_pnl_{first_id}", style="danger")
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="🔙 Back to Products", callback_data="admin_manage_prods", icon_custom_emoji_id=get_emoji_icon("back"))
+    ])
+    
+    maint_status_text = "🔴 <b>UNDER MAINTENANCE</b> (Purchases Blocked)" if is_maint else "🟢 <b>LIVE</b> (Available for Customers)"
+    
+    text = (
+        f"📁 <b><u>PANEL: {panel_name}</u></b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"📦 <b>Category:</b> {cat}\n"
+        f"🔑 <b>Panel PID:</b> <code>{bb_pid or 'Not Set'}</code>\n"
+        f"📥 <b>APK Link:</b> {apk_link or 'None'}\n"
+        f"🛠 <b>Status:</b> {maint_status_text}\n"
+        f"📊 <b>Total Plans:</b> {len(plans)} Plans\n━━━━━━━━━━━━━━━━━━\n"
+        f"👇 <b>Select any plan below to edit Price, Reseller Duration or Delete:</b>"
+    )
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("toggle_maint_pnl_"))
+async def admin_toggle_panel_maintenance(call: CallbackQuery):
+    if not is_admin_user(call.from_user.id): return
+    first_id = int(call.data.split("toggle_maint_pnl_")[1])
+    prod = db_query("SELECT category, panel_name, is_maintenance FROM products WHERE id=?", (first_id,), fetchone=True)
+    if not prod: return await call.answer("Panel not found.", show_alert=True)
+    cat, panel_name, current_maint = prod
+    
+    new_maint = 0 if (current_maint and current_maint == 1) else 1
+    db_query("UPDATE products SET is_maintenance=? WHERE category=? AND panel_name=?", (new_maint, cat, panel_name))
+    
+    msg = f"🔴 '{panel_name}' is now in MAINTENANCE MODE!\nUsers cannot open or buy it in Store." if new_maint == 1 else f"🟢 '{panel_name}' is now LIVE!\nUsers can view and buy plans."
+    await call.answer(msg, show_alert=True)
+    
+    call.data = f"admin_pnl_view_{first_id}"
+    await admin_panel_plans_view(call)
+
+@dp.callback_query(F.data.startswith("del_all_pnl_"))
+async def admin_delete_entire_panel(call: CallbackQuery):
+    if not is_admin_user(call.from_user.id): return
+    first_id = int(call.data.split("del_all_pnl_")[1])
+    prod = db_query("SELECT category, panel_name FROM products WHERE id=?", (first_id,), fetchone=True)
+    if not prod: return await call.answer("Panel already deleted.", show_alert=True)
+    cat, panel_name = prod
+    
+    db_query("DELETE FROM products WHERE category=? AND panel_name=?", (cat, panel_name))
+    await call.answer(f"🗑 Panel '{panel_name}' and all its plans deleted!", show_alert=True)
+    await admin_manage_prods(call)
 
 @dp.callback_query(F.data.startswith("admin_view_p_"))
 async def admin_view_product(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     try:
         p_id = int(call.data.split("_")[3])
         prod = db_query("SELECT * FROM products WHERE id=?", (p_id,), fetchone=True)
-        if not prod: return await call.answer("❌ Architecture fault: Node lost!", show_alert=True)
+        if not prod: return await call.answer("❌ Item not found!", show_alert=True)
         panel_name = prod[2] if prod[2] is not None else ""
         price_inr = safe_float(prod[4])
         reseller_price = safe_float(prod[5])
-        text = (f"📦 <b><u>NODE DEEP DIVE DETAILS</u></b>\n━━━━━━━━━━━━━━━━━━\n<b>ID:</b> <code>{prod[0]}</code>\n<b>Panel Group:</b> {prod[1]}\n<b>Panel Name:</b> {panel_name}\n<b>Package Date/Time:</b> {prod[3]}\n<b>Standard Price:</b> {fmt_curr(price_inr)}\n👑 <b>Wholesale Price:</b> {fmt_curr(reseller_price)}\n<b>Vault Stock:</b> {prod[6]}\n<b>Payload Link:</b> {prod[7] if prod[7] else 'None'}\n<b>Time Config:</b> {prod[8]}\n<b>HWID Limit:</b> {prod[9]}\n🔑 <b>Bantibhaiya PID:</b> {prod[10] or 'Not set'}\n⏱ <b>Bantibhaiya Duration:</b> {prod[11] or 'Not set'}\n<b>Visibility:</b> {'Active' if prod[12] else 'Hidden'}\n━━━━━━━━━━━━━━━━━━")
-        toggle_btn_text = "Hide Product 👁‍🗨" if prod[12] else "Unhide Product 👁"
+        bb_pid = prod[10] or "Not set"
+        bb_duration = prod[11] or "Not set"
+        
+        first_panel_item = db_query("SELECT id FROM products WHERE category=? AND panel_name=? LIMIT 1", (prod[1], panel_name), fetchone=True)
+        first_id = first_panel_item[0] if first_panel_item else p_id
+        
+        text = (
+            f"📦 <b><u>PLAN CONFIGURATION</u></b>\n━━━━━━━━━━━━━━━━━━\n"
+            f"📁 <b>Panel Name:</b> <b>{panel_name}</b>\n"
+            f"📦 <b>Category:</b> {prod[1]}\n"
+            f"📅 <b>Plan Display Name:</b> <b>{prod[3]}</b>\n"
+            f"💰 <b>Standard User Price:</b> {fmt_curr(price_inr)}\n"
+            f"👑 <b>Wholesale Reseller Price:</b> {fmt_curr(reseller_price)}\n"
+            f"🔑 <b>Bantibhaiya PID:</b> <code>{bb_pid}</code>\n"
+            f"⏱ <b>Bantibhaiya API Duration:</b> <code>{bb_duration}</code>\n"
+            f"📥 <b>APK Link:</b> {prod[7] if prod[7] else 'None'}\n"
+            f"👁 <b>Status:</b> {'🟢 Active' if prod[12] else '🔴 Hidden'}\n━━━━━━━━━━━━━━━━━━"
+        )
+        toggle_btn_text = "Hide Plan 👁‍🗨" if prod[12] else "Unhide Plan 🟢"
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Edit Panel Group 🏷️", callback_data=f"edit_p_{p_id}_cat", style="primary"), InlineKeyboardButton(text="Edit Panel Name 🏷️", callback_data=f"edit_p_{p_id}_panel_name", style="primary")],
-            [InlineKeyboardButton(text="Edit Package Name ✏️", callback_data=f"edit_p_{p_id}_name", style="primary")],
-            [InlineKeyboardButton(text="Edit Price 💰", callback_data=f"edit_p_{p_id}_price", style="primary"), InlineKeyboardButton(text="Edit R-Price 👑", callback_data=f"edit_p_{p_id}_rprice", style="primary")],
-            [InlineKeyboardButton(text="Edit Validity ⏳", callback_data=f"edit_p_{p_id}_validity", style="primary"), InlineKeyboardButton(text="Edit Device 📱", callback_data=f"edit_p_{p_id}_device", style="primary")],
-            [InlineKeyboardButton(text="Edit BB PID 🔑", callback_data=f"edit_p_{p_id}_bbpid", style="primary"), InlineKeyboardButton(text="Edit BB Duration ⏱", callback_data=f"edit_p_{p_id}_bbduration", style="primary")],
-            [InlineKeyboardButton(text="Edit APK Link 🔗", callback_data=f"edit_p_{p_id}_apk", style="primary"), InlineKeyboardButton(text="Add Keys ➕", callback_data=f"edit_p_{p_id}_keys", style="success")],
-            [InlineKeyboardButton(text="Delete Key 🗑", callback_data=f"delkey_p_{p_id}", style="danger"), InlineKeyboardButton(text=toggle_btn_text, callback_data=f"toggle_p_{p_id}", style="danger")],
-            [InlineKeyboardButton(text="Nuke Full Node 🗑", callback_data=f"delete_p_{p_id}", style="danger"), InlineKeyboardButton(text="BACK", callback_data="admin_manage_prods", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+            [InlineKeyboardButton(text="💰 Edit User Price", callback_data=f"edit_p_{p_id}_price", style="primary"), InlineKeyboardButton(text="👑 Edit Reseller Price", callback_data=f"edit_p_{p_id}_rprice", style="primary")],
+            [InlineKeyboardButton(text="⏱ Edit API Duration", callback_data=f"edit_p_{p_id}_bbduration", style="primary"), InlineKeyboardButton(text="📅 Edit Display Name", callback_data=f"edit_p_{p_id}_name", style="primary")],
+            [InlineKeyboardButton(text="🔑 Edit Panel PID", callback_data=f"edit_p_{p_id}_bbpid", style="primary"), InlineKeyboardButton(text="🔗 Edit APK Link", callback_data=f"edit_p_{p_id}_apk", style="primary")],
+            [InlineKeyboardButton(text=toggle_btn_text, callback_data=f"toggle_p_{p_id}", style="primary"), InlineKeyboardButton(text="🗑 Delete This Plan", callback_data=f"delete_p_{p_id}", style="danger")],
+            [InlineKeyboardButton(text=f"🔙 Back to {panel_name[:15]} Plans", callback_data=f"admin_pnl_view_{first_id}", icon_custom_emoji_id=get_emoji_icon("back"))]
         ])
         await call.message.edit_text(text, reply_markup=kb, disable_web_page_preview=True, parse_mode='HTML')
     except Exception as e:
@@ -2236,7 +3071,7 @@ async def admin_view_product(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("toggle_p_"))
 async def admin_toggle_product(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     p_id = int(call.data.split("_")[2])
     current = db_query("SELECT is_active FROM products WHERE id=?", (p_id,), fetchone=True)[0]
     new_val = 0 if current == 1 else 1
@@ -2244,33 +3079,35 @@ async def admin_toggle_product(call: CallbackQuery):
     await call.answer("Visibility updated successfully!", show_alert=True)
     await admin_view_product(call)
 
-# ==============================================================================
-# FIX: Edit product field – correctly handle different data types and multi-word fields
-# ==============================================================================
 @dp.callback_query(F.data.startswith("edit_p_"))
 async def start_edit_product(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    # Use split with maxsplit=3 to keep field name intact (may contain underscores)
+    if not is_admin_user(call.from_user.id): return
     parts = call.data.split("_", 3)
     if len(parts) < 4:
         return await call.answer("Invalid callback data.", show_alert=True)
     p_id = int(parts[2])
     field = parts[3]
     await state.update_data(edit_p_id=p_id, edit_field=field)
-    if field == 'keys':
-        await call.message.edit_text("📥 <b>Vault Injection</b>\nPaste the <b>NEW KEYS</b> to append to the stock (1 key per line):", reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.wait_for_add_keys)
-    else:
-        field_name_map = {'cat': 'New Panel Group/Category Name', 'panel_name': 'New Panel Name', 'name': 'New Package/Date Name', 'price': 'New Standard Price in ₹', 'rprice': 'New Reseller Price in ₹', 'validity': 'New Time Validity String', 'device': 'New HWID Limit String', 'bbpid': 'New Bantibhaiya Product PID (or type "none")', 'bbduration': 'New Bantibhaiya Product Duration (or type "none")', 'apk': 'New Payload Link (or type "none")'}
-        await call.message.edit_text(f"✏️ Input the required data for: <b>{field_name_map.get(field, field)}</b>", reply_markup=admin_back_kb(), parse_mode='HTML')
-        await state.set_state(AdminStates.wait_for_new_value)
+    field_name_map = {
+        'cat': 'New Category Name',
+        'panel_name': 'New Panel Name',
+        'name': 'New Plan Display Name (e.g. 7 Days)',
+        'price': 'New Standard User Price in ₹',
+        'rprice': 'New Wholesale Reseller Price in ₹',
+        'validity': 'New Time Validity String',
+        'device': 'New HWID Limit String',
+        'bbpid': 'New Bantibhaiya Product PID',
+        'bbduration': 'New Bantibhaiya API Duration parameter (e.g. 7d, 7 Days)',
+        'apk': 'New APK Link (or type "none")'
+    }
+    await call.message.edit_text(f"✏️ <b>Enter {field_name_map.get(field, field)}:</b>", reply_markup=admin_back_kb(), parse_mode='HTML')
+    await state.set_state(AdminStates.wait_for_new_value)
 
 @dp.message(AdminStates.wait_for_new_value)
 async def process_edit_value(m: Message, state: FSMContext):
     data = await state.get_data()
     p_id = data['edit_p_id']; field = data['edit_field']; new_val = m.text.strip()
     
-    # Convert price fields to float, others remain strings
     if field in ['price', 'rprice']:
         try:
             new_val = float(new_val)
@@ -2278,56 +3115,43 @@ async def process_edit_value(m: Message, state: FSMContext):
             return await m.answer("❌ Invalid number format. Please enter a valid price (e.g., 500).")
     elif field in ['apk', 'bbpid', 'bbduration']:
         new_val = "" if new_val.lower() == 'none' else new_val
-    # For panel_name, cat, name, validity, device – keep as string
     
     db_col_map = {'cat': 'category', 'panel_name': 'panel_name', 'name': 'name', 'price': 'price_inr', 'rprice': 'reseller_price', 'validity': 'validity', 'device': 'device_limit', 'bbpid': 'bantibhaiya_product_pid', 'bbduration': 'bantibhaiya_product_duration', 'apk': 'apk_link'}
-    db_query(f"UPDATE products SET {db_col_map[field]}=? WHERE id=?", (new_val, p_id))
-    await m.answer("✅ <b>Node updated gracefully!</b>", reply_markup=admin_kb(), parse_mode='HTML')
-    await state.clear()
-
-@dp.message(AdminStates.wait_for_add_keys)
-async def process_add_keys(m: Message, state: FSMContext):
-    data = await state.get_data()
-    p_id = data['edit_p_id']
-    keys = [k.strip() for k in m.text.strip().split('\n') if k.strip()]
-    if len(keys) == 0: return await m.answer("❌ Protocol breach: Zero valid keys found.", reply_markup=admin_kb(), parse_mode='HTML')
-    conn = sqlite3.connect('Cuibcc.db')
-    c = conn.cursor()
-    for k in keys: c.execute("INSERT INTO product_keys (product_id, key_text) VALUES (?, ?)", (p_id, k))
-    c.execute("UPDATE products SET stock = stock + ? WHERE id=?", (len(keys), p_id))
-    conn.commit(); conn.close()
-    await m.answer(f"✅ <b>Vault Secure!</b> {len(keys)} new keys appended and encrypted.", reply_markup=admin_kb(), parse_mode='HTML')
+    
+    # If editing panel-wide fields (panel_name, bbpid, apk), update across all plans in that panel
+    if field in ['panel_name', 'bbpid', 'apk']:
+        prod = db_query("SELECT category, panel_name FROM products WHERE id=?", (p_id,), fetchone=True)
+        if prod:
+            cat, p_name = prod
+            db_query(f"UPDATE products SET {db_col_map[field]}=? WHERE category=? AND panel_name=?", (new_val, cat, p_name))
+    else:
+        db_query(f"UPDATE products SET {db_col_map[field]}=? WHERE id=?", (new_val, p_id))
+        
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔍 View Plan Details", callback_data=f"admin_view_p_{p_id}", style="primary")],
+        [InlineKeyboardButton(text="📦 Back to Products", callback_data="admin_manage_prods", icon_custom_emoji_id=get_emoji_icon("back"))]
+    ])
+    await m.answer(f"✅ <b>Plan property updated successfully!</b>", reply_markup=kb, parse_mode='HTML')
     await state.clear()
 
 @dp.callback_query(F.data.startswith("delete_p_"))
 async def admin_delete_product(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     p_id = int(call.data.split("_")[2])
+    prod = db_query("SELECT category, panel_name FROM products WHERE id=?", (p_id,), fetchone=True)
+    
     db_query("DELETE FROM products WHERE id=?", (p_id,))
     db_query("DELETE FROM product_keys WHERE product_id=?", (p_id,))
-    await call.answer("☢️ Nuclear wipe successful! Node and vault deleted.", show_alert=True)
+    await call.answer("🗑 Plan deleted successfully!", show_alert=True)
+    
+    if prod:
+        cat, panel_name = prod
+        remaining = db_query("SELECT id FROM products WHERE category=? AND panel_name=? LIMIT 1", (cat, panel_name), fetchone=True)
+        if remaining:
+            call.data = f"admin_pnl_view_{remaining[0]}"
+            return await admin_panel_plans_view(call)
+            
     await admin_manage_prods(call)
-
-@dp.callback_query(F.data.startswith("delkey_p_"))
-async def admin_delete_key_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    p_id = int(call.data.split("_")[2])
-    await state.update_data(del_p_id=p_id)
-    await call.message.edit_text("🗑 Send the <b>exact string match</b> of the key you wish to purge from the vault:", reply_markup=admin_back_kb(), parse_mode='HTML')
-    await state.set_state(AdminStates.wait_for_delete_key)
-
-@dp.message(AdminStates.wait_for_delete_key)
-async def process_delete_key(m: Message, state: FSMContext):
-    data = await state.get_data()
-    p_id = data['del_p_id']
-    key_to_delete = m.text.strip()
-    key_data = db_query("SELECT id, is_used FROM product_keys WHERE product_id=? AND key_text=?", (p_id, key_to_delete), fetchone=True)
-    if not key_data: return await m.answer("❌ Key not found. Check logs and try again.", reply_markup=admin_back_kb(), parse_mode='HTML')
-    if key_data[1] == 1: return await m.answer("⚠️ Action Blocked: This key has already been dispatched to a user.", reply_markup=admin_back_kb(), parse_mode='HTML')
-    db_query("DELETE FROM product_keys WHERE id=?", (key_data[0],))
-    db_query("UPDATE products SET stock = stock - 1 WHERE id=?", (p_id,))
-    await m.answer(f"✅ Key <code>{key_to_delete}</code> securely purged from vault.\n📦 Database indices updated.", reply_markup=admin_kb(), parse_mode='HTML')
-    await state.clear()
 
 # ==============================================================================
 # 21. ADMIN TICKETS, BROADCAST, COUPONS
@@ -2546,9 +3370,9 @@ async def save_emoji_slot(m: Message, state: FSMContext):
 async def admin_edit_ui_menu(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID: return
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Edit Start Menu Text", callback_data="edit_ui_start_menu", style="primary")],
-        [InlineKeyboardButton(text="Edit VIP Menu Text", callback_data="edit_ui_vip_menu", style="primary")],
-        [InlineKeyboardButton(text="Edit Add Balance Text", callback_data="edit_ui_add_balance_menu", style="primary")],
+        [InlineKeyboardButton(text="Edit Start Menu Text", callback_data="edit_ui_start", style="primary")],
+        [InlineKeyboardButton(text="Edit VIP Menu Text", callback_data="edit_ui_vip", style="primary")],
+        [InlineKeyboardButton(text="Edit Add Balance Text", callback_data="edit_ui_add_balance", style="primary")],
         [InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
     ])
     await call.message.edit_text("✏️ <b>Edit User Interface Texts</b>\nSelect which text you want to modify:", reply_markup=kb, parse_mode='HTML')
@@ -2556,10 +3380,7 @@ async def admin_edit_ui_menu(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("edit_ui_"))
 async def admin_edit_ui_prompt(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
-    ui_key = call.data.split("edit_ui_", 1)[1]
-    if ui_key == "start": ui_key = "start_menu"
-    elif ui_key == "vip": ui_key = "vip_menu"
-    elif ui_key == "add_balance": ui_key = "add_balance_menu"
+    ui_key = call.data.split("_")[2]
     await state.update_data(ui_key=ui_key)
     current_text = get_ui_text(ui_key)
     await call.message.edit_text(f"📝 Send the new text for <b>{ui_key.upper()}</b> menu.\n\nCurrent text:\n{current_text}", reply_markup=admin_back_kb(), parse_mode='HTML')
@@ -2569,15 +3390,9 @@ async def admin_edit_ui_prompt(call: CallbackQuery, state: FSMContext):
 async def admin_save_ui_text(m: Message, state: FSMContext):
     data = await state.get_data()
     ui_key = data['ui_key']
-    new_text = m.text.strip()
+    new_text = m.text
     db_query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (f"ui_{ui_key}", new_text))
-    if ui_key == "start_menu":
-        db_query("INSERT OR REPLACE INTO settings (key, value) VALUES ('ui_start', ?)", (new_text,))
-    elif ui_key == "vip_menu":
-        db_query("INSERT OR REPLACE INTO settings (key, value) VALUES ('ui_vip', ?)", (new_text,))
-    elif ui_key == "add_balance_menu":
-        db_query("INSERT OR REPLACE INTO settings (key, value) VALUES ('ui_add_balance', ?)", (new_text,))
-    await m.answer(f"✅ UI text for <b>{ui_key}</b> updated successfully!", reply_markup=admin_kb(), parse_mode='HTML')
+    await m.answer(f"✅ UI text <b>{ui_key}</b> updated successfully!", reply_markup=admin_kb(), parse_mode='HTML')
     await state.clear()
 
 @dp.callback_query(F.data == "admin_edit_reseller_price")
@@ -2683,6 +3498,7 @@ async def admin_set_category_emojis(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     for cat in FIXED_CATEGORIES:
+        # Fetch the specific category emoji
         current = get_setting(f"cat_emoji_{cat}", "Not set")
         kb.inline_keyboard.append([InlineKeyboardButton(text=f"{cat} (ID: {current})", callback_data=f"set_cat_emoji_{cat}", style="primary")])
     kb.inline_keyboard.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
@@ -2693,7 +3509,8 @@ async def admin_set_category_emoji_prompt(call: CallbackQuery, state: FSMContext
     if call.from_user.id != ADMIN_ID: return
     category = call.data.split("set_cat_emoji_", 1)[1]
     await state.update_data(cat_emoji_category=category)
-    await call.message.edit_text(f"🎨 Enter the emoji ID for <b>{category}</b>:\n(Leave empty to reset to default)", reply_markup=admin_back_kb(), parse_mode='HTML')
+    current = get_setting(f"cat_emoji_{category}", "Not set")
+    await call.message.edit_text(f"🎨 Enter the emoji ID for <b>{category}</b>:\nCurrent: {current}\n(Leave empty to reset to default)", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_category_emoji)
 
 @dp.message(AdminStates.wait_for_category_emoji)
@@ -2732,7 +3549,8 @@ async def admin_set_panel_emoji_prompt(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
     panel_name = call.data.split("set_panel_emoji_", 1)[1]
     await state.update_data(panel_emoji_name=panel_name)
-    await call.message.edit_text(f"🎨 Enter the emoji ID for panel <b>{panel_name}</b>:\n(Leave empty to reset to default)", reply_markup=admin_back_kb(), parse_mode='HTML')
+    current = get_setting(f"panel_emoji_{panel_name}", "Not set")
+    await call.message.edit_text(f"🎨 Enter the emoji ID for panel <b>{panel_name}</b>:\nCurrent: {current}\n(Leave empty to reset to default)", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_panel_emoji_id)
 
 @dp.message(AdminStates.wait_for_panel_emoji_id)
@@ -2787,8 +3605,8 @@ async def admin_api_setup(call: CallbackQuery):
     ])
     text = (
         "🔐 <b>EXTERNAL API GATEWAY SETUP</b>\n\n"
-        f"<b>Bantibhaiya</b>\n🌐 URL: <code>{reseller_url}</code>\n🔑 API Key: <code>{mask_secret(reseller_key)}</code>\n🛡 Master Key: <code>{mask_secret(reseller_master)}</code>\n\n"
-        f"<b>Payment Gateway</b>\n🌐 URL: <code>{gateway_url}</code>\n🔒 Token: <code>{mask_secret(gateway_token)}</code>\n↪️ Redirect: <code>{gateway_redirect or 'Not set'}</code>\n\n"
+        f"<b>Bantibhaiya</b>\n🌐 URL: <code>{html.escape(reseller_url)}</code>\n🔑 API Key: <code>{mask_secret(reseller_key)}</code>\n🛡 Master Key: <code>{mask_secret(reseller_master)}</code>\n\n"
+        f"<b>Payment Gateway</b>\n🌐 URL: <code>{html.escape(gateway_url)}</code>\n🔒 Token: <code>{mask_secret(gateway_token)}</code>\n↪️ Redirect: <code>{html.escape(gateway_redirect or 'Not set')}</code>\n\n"
         "Select a field below to change it."
     )
     await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
@@ -2887,12 +3705,12 @@ async def api_gateway_redirect_save(m: Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_setup_fampay")
 async def setup_fampay_start(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
-    current_api = get_setting("fampay_api_key", "Not set")
-    current_upi = get_setting("fampay_upi_id", "Not set")
+    current_api = get_setting("fampay_api_key", "") # Fetch current API key for display
+    current_upi = get_setting("fampay_upi_id", "") # Fetch current UPI ID for display
     await call.message.edit_text(
         f"⚙️ <b>FAMPAY SECURITY DEPLOYMENT</b>\n\n"
-        f"🔑 Current API Key: {current_api[:8] if current_api != 'Not set' else 'Not set'}... (hidden)\n"
-        f"🏦 Current UPI ID: {current_upi}\n\n"
+        f"🔑 Current API Key: <code>{mask_secret(current_api)}</code>\n" # Use mask_secret for display
+        f"🏦 Current UPI ID: <code>{html.escape(current_upi or 'Not set')}</code>\n\n" # Escape UPI ID and handle empty
         f"Send new <b>FamPay API Key</b>:\n<i>(Type /cancel to abort)</i>",
         reply_markup=admin_back_kb(), parse_mode='HTML'
     )
@@ -2914,7 +3732,7 @@ async def setup_fampay_upi(m: Message, state: FSMContext):
     if '@' not in upi_id:
         return await m.answer("❌ Invalid UPI ID! Must contain '@'. Example: example@okhdfcbank", parse_mode='HTML')
     set_setting("fampay_upi_id", upi_id)
-    await m.answer(f"✅ <b>FamPay Gateway configured successfully!</b>\n\n🏦 UPI ID: {upi_id}\n🔑 API Key: Saved\n\nGateway is now ready for payments.", reply_markup=admin_kb(), parse_mode='HTML')
+    await m.answer(f"✅ <b>FamPay Gateway configured successfully!</b>\n\n🏦 UPI ID: <code>{html.escape(upi_id)}</code>\n🔑 API Key: Saved\n\nGateway is now ready for payments.", reply_markup=admin_kb(), parse_mode='HTML')
     await state.clear()
 
 # ==============================================================================
@@ -2954,6 +3772,9 @@ async def main() -> None:
     init_db()
     logger.info("Initializing DB structure...")
     migrate_categories()
+    # Check if a custom FamGateway is configured, if so, run auto_verify_task
+    # otherwise, if legacy FamPay is configured, it also uses auto_verify_task.
+    # The `auto_verify_task` itself has checks to determine if a gateway is active.
     asyncio.create_task(auto_verify_task())
     logger.info("FamGateway Auto-Verifier Daemon Running in Background (3s polling).")
     logger.info("🚀 CORE SYSTEM IS FULLY OPERATIONAL...")

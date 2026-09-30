@@ -509,42 +509,73 @@ export function deleteHostedProject(id: string): boolean {
 
 export function autoDiscoverHostedPythonBots() {
   try {
-    if (!fs.existsSync(hostedPythonBotsDir)) return;
-    const dirs = fs.readdirSync(hostedPythonBotsDir);
-    for (const d of dirs) {
-      if (d === 'manifest.json' || d.startsWith('.')) continue;
-      const fullDir = path.join(hostedPythonBotsDir, d);
-      try {
-        if (!fs.statSync(fullDir).isDirectory()) continue;
-      } catch (_) {
-        continue;
-      }
+    if (fs.existsSync(hostedPythonBotsDir)) {
+      const dirs = fs.readdirSync(hostedPythonBotsDir);
+      for (const d of dirs) {
+        if (d === 'manifest.json' || d.startsWith('.')) continue;
+        const fullDir = path.join(hostedPythonBotsDir, d);
+        try {
+          if (!fs.statSync(fullDir).isDirectory()) continue;
+        } catch (_) {
+          continue;
+        }
 
-      const exists = hostedPythonBots.some(b => b.id === d);
-      if (!exists) {
-        const files = fs.readdirSync(fullDir);
-        const pyFiles = files.filter(f => f.endsWith('.py'));
-        if (pyFiles.length === 0) continue;
-        const entryFile = pyFiles.includes('main.py') ? 'main.py' : (pyFiles.includes('bot.py') ? 'bot.py' : pyFiles[0]);
-        
-        const botInfo: HostedPythonBot = {
-          id: d,
-          name: entryFile,
-          entryFile,
-          sourceType: 'web_upload',
-          senderUsername: 'cloud_user',
-          originalFileName: entryFile,
-          fileSizeMB: 0.1,
-          status: 'RUNNING',
-          startedAt: new Date().toLocaleTimeString(),
-          uptimeSeconds: 0,
-          logs: [`[SYSTEM] Auto-discovered bot folder "${d}" on disk.`],
-          description: `Auto-discovered Python bot (${entryFile})`
-        };
-        hostedPythonBots.push(botInfo);
-        spawnPythonBotProcess(botInfo);
+        const exists = hostedPythonBots.some(b => b.id === d);
+        if (!exists) {
+          const files = fs.readdirSync(fullDir);
+          const pyFiles = files.filter(f => f.endsWith('.py'));
+          if (pyFiles.length === 0) continue;
+          const entryFile = pyFiles.includes('main.py') ? 'main.py' : (pyFiles.includes('bot.py') ? 'bot.py' : pyFiles[0]);
+          
+          const botInfo: HostedPythonBot = {
+            id: d,
+            name: entryFile,
+            entryFile,
+            sourceType: 'web_upload',
+            senderUsername: 'cloud_user',
+            originalFileName: entryFile,
+            fileSizeMB: 0.1,
+            status: 'RUNNING',
+            startedAt: new Date().toLocaleTimeString(),
+            uptimeSeconds: 0,
+            logs: [`[SYSTEM] Auto-discovered bot folder "${d}" on disk.`],
+            description: `Auto-discovered Python bot (${entryFile})`
+          };
+          hostedPythonBots.push(botInfo);
+          spawnPythonBotProcess(botInfo);
+        }
       }
     }
+
+    // Auto-discover user Python files in downloads directory
+    const scanDownloadsForPython = (dir: string) => {
+      if (!fs.existsSync(dir)) return;
+      const entries = fs.readdirSync(dir);
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry);
+        let stat;
+        try { stat = fs.statSync(fullPath); } catch (_) { continue; }
+        if (stat.isDirectory()) {
+          if (entry !== 'node_modules' && entry !== '.git' && entry !== '__pycache__') {
+            scanDownloadsForPython(fullPath);
+          }
+        } else if (stat.isFile() && entry.endsWith('.py') && !SYSTEM_IGNORED_FILES.has(entry)) {
+          const pyBotId = 'pybot_' + entry.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+          if (!hostedPythonBots.some(b => b.id === pyBotId || b.originalFileName === entry)) {
+            try {
+              const code = fs.readFileSync(fullPath, 'utf-8');
+              deployPythonBotFromFile(code, {
+                name: entry,
+                originalFileName: entry,
+                senderUsername: 'cloud_user',
+                sourceType: 'web_upload'
+              });
+            } catch (_) {}
+          }
+        }
+      }
+    };
+    scanDownloadsForPython(downloadsRootDir);
   } catch (err) {
     console.warn('[Auto-discover python bots error]', err);
   }
@@ -1492,6 +1523,7 @@ export async function deployPythonBotFromFile(
 
   // Immediately spawn background execution
   spawnPythonBotProcess(botInfo);
+  saveManifests();
 
   return botInfo;
 }
@@ -1587,6 +1619,7 @@ export async function deployPythonBotFromZip(
   }
 
   hostedPythonBots.unshift(botInfo);
+  saveManifests();
   return botInfo;
 }
 
@@ -1598,7 +1631,9 @@ export function startPythonBot(id: string): boolean {
   if (!bot) return false;
   bot.autoRestartEnabled = true;
   bot.status = 'RUNNING';
-  return spawnPythonBotProcess(bot);
+  const ok = spawnPythonBotProcess(bot);
+  saveManifests();
+  return ok;
 }
 
 /**
@@ -1622,6 +1657,7 @@ export function stopPythonBot(id: string): boolean {
   }
   bot.logs.push(`--- [${new Date().toLocaleTimeString()}] Bot manually stopped by user ---`);
   addLog(bot.botId || 'python_engine', 'WARN', `Bot "${bot.name}" (${id}) stopped by user.`);
+  saveManifests();
   return true;
 }
 
@@ -1640,6 +1676,7 @@ export function deletePythonBot(id: string): boolean {
   }
 
   addLog('python_engine', 'WARN', `Permanently deleted hosted bot "${removed.name}" (${id})`);
+  saveManifests();
   return true;
 }
 
@@ -1665,9 +1702,13 @@ export function getPythonBotScriptPath(id: string): { filePath: string; fileName
   }
 
   // Robust fallback to primary bot script in downloads directory
-  const primaryFallback = path.resolve(process.cwd(), 'downloads/bot_master_primary/Main_QR_PAYMENT_ALL_FIXED.py');
+  const primaryFallback = path.resolve(process.cwd(), 'downloads/bot_master_primary/FREE_FIRE_SELLING_BOT_UPDATED.py');
   if (fs.existsSync(primaryFallback)) {
-    return { filePath: primaryFallback, fileName: 'Main_QR_PAYMENT_ALL_FIXED.py' };
+    return { filePath: primaryFallback, fileName: 'FREE_FIRE_SELLING_BOT_UPDATED.py' };
+  }
+  const rootFallback = path.resolve(process.cwd(), 'downloads/FREE_FIRE_SELLING_BOT_UPDATED.py');
+  if (fs.existsSync(rootFallback)) {
+    return { filePath: rootFallback, fileName: 'FREE_FIRE_SELLING_BOT_UPDATED.py' };
   }
   return null;
 }
