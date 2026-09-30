@@ -1,6 +1,6 @@
 import os from 'os';
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
 import {
   HostedPythonBot,
   getHostedPythonBots,
@@ -8,7 +8,8 @@ import {
   stopPythonBot,
   deletePythonBot,
   addLog,
-  recordFileSubmission
+  addSubmission,
+  deploySingleHtml
 } from './botManager';
 
 /**
@@ -62,16 +63,74 @@ export function setupTeleHostTelegramBot(
     const senderId = sender?.id || chatId;
     const text = (msg.text || '').trim();
 
-    // 📤 HANDLE DOCUMENT UPLOAD (.py or .zip)
-    if (msg.document) {
-      const doc = msg.document;
-      const fileName = doc.file_name || 'bot.py';
-      const fileId = doc.file_id;
-      const fileSizeMB = doc.file_size ? Number((doc.file_size / (1024 * 1024)).toFixed(3)) : 0.01;
+    // 📤 HANDLE DOCUMENT, PHOTO, VIDEO, AUDIO UPLOADS IN REAL-TIME
+    if (msg.document || msg.photo || msg.video || msg.audio || msg.voice || msg.animation) {
+      let fileId = '';
+      let fileName = '';
+      let fileSizeMB = 0.01;
+      let mimeType = 'application/octet-stream';
+
+      if (msg.document) {
+        fileId = msg.document.file_id;
+        fileName = msg.document.file_name || `file_${Date.now()}`;
+        fileSizeMB = msg.document.file_size ? Number((msg.document.file_size / (1024 * 1024)).toFixed(3)) : 0.01;
+        mimeType = msg.document.mime_type || 'application/octet-stream';
+      } else if (msg.photo && msg.photo.length > 0) {
+        const largestPhoto = msg.photo[msg.photo.length - 1];
+        fileId = largestPhoto.file_id;
+        fileName = `photo_${Date.now()}.jpg`;
+        fileSizeMB = largestPhoto.file_size ? Number((largestPhoto.file_size / (1024 * 1024)).toFixed(3)) : 0.05;
+        mimeType = 'image/jpeg';
+      } else if (msg.video) {
+        fileId = msg.video.file_id;
+        fileName = msg.video.file_name || `video_${Date.now()}.mp4`;
+        fileSizeMB = msg.video.file_size ? Number((msg.video.file_size / (1024 * 1024)).toFixed(3)) : 0.5;
+        mimeType = msg.video.mime_type || 'video/mp4';
+      } else if (msg.audio) {
+        fileId = msg.audio.file_id;
+        fileName = msg.audio.file_name || `audio_${Date.now()}.mp3`;
+        fileSizeMB = msg.audio.file_size ? Number((msg.audio.file_size / (1024 * 1024)).toFixed(3)) : 0.2;
+        mimeType = msg.audio.mime_type || 'audio/mpeg';
+      } else if (msg.voice) {
+        fileId = msg.voice.file_id;
+        fileName = `voice_${Date.now()}.ogg`;
+        fileSizeMB = msg.voice.file_size ? Number((msg.voice.file_size / (1024 * 1024)).toFixed(3)) : 0.05;
+        mimeType = 'audio/ogg';
+      } else if (msg.animation) {
+        fileId = msg.animation.file_id;
+        fileName = msg.animation.file_name || `animation_${Date.now()}.mp4`;
+        fileSizeMB = msg.animation.file_size ? Number((msg.animation.file_size / (1024 * 1024)).toFixed(3)) : 0.2;
+        mimeType = msg.animation.mime_type || 'video/mp4';
+      }
+
+      const subId = `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const downloadsDir = path.join(process.cwd(), 'downloads');
+      if (!fs.existsSync(downloadsDir)) {
+        fs.mkdirSync(downloadsDir, { recursive: true });
+      }
+      const savedFilePath = path.join(downloadsDir, fileName);
+
+      // INSTANTLY RECORD SUBMISSION SO WEBSITE SHOWS IT IMMEDIATELY
+      addSubmission({
+        id: subId,
+        botId: botId || 'bot_primary',
+        senderId,
+        senderUsername,
+        fileName,
+        fileSizeMB,
+        mimeType,
+        caption: msg.caption || text || 'Telegram File Received',
+        status: 'COMPLETED',
+        reason: 'Received in real-time from Telegram user',
+        approvalReason: 'Received in real-time from Telegram user',
+        timestamp: new Date().toLocaleTimeString(),
+        localFilePath: savedFilePath,
+        downloadedPath: savedFilePath
+      });
 
       const waitMsg = await bot.sendMessage(
         chatId,
-        `📥 <b>File Received:</b> <code>${fileName}</code> (${fileSizeMB} MB)\n⏳ <i>Analyzing code & launching 24/7 Python cloud worker...</i>`,
+        `📥 <b>File Received:</b> <code>${fileName}</code> (${fileSizeMB} MB)\n⏳ <i>Saving & syncing to website in real-time...</i>`,
         { parse_mode: 'HTML' }
       );
 
@@ -82,13 +141,7 @@ export function setupTeleHostTelegramBot(
           throw new Error(`Failed to download file from Telegram: HTTP ${resp.status}`);
         }
         const fileBuffer = Buffer.from(await resp.arrayBuffer());
-
-        // Also save copy into downloads folder
-        try {
-          const downloadDir = path.resolve(process.cwd(), 'downloads', 'bot_master_primary');
-          if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true });
-          fs.writeFileSync(path.join(downloadDir, fileName), fileBuffer);
-        } catch (_) {}
+        fs.writeFileSync(savedFilePath, fileBuffer);
 
         if (fileName.endsWith('.py')) {
           const code = fileBuffer.toString('utf-8');
@@ -107,10 +160,9 @@ export function setupTeleHostTelegramBot(
             `🤖 <b>Bot Name:</b> <code>${deployedBot.name}</code>\n` +
             `🆔 <b>Worker ID:</b> <code>${deployedBot.id}</code>\n` +
             `📊 <b>Status:</b> 🟢 <b>RUNNING (PID: ${deployedBot.pid || 'Active'})</b>\n` +
-            `🐍 <b>Runtime:</b> Python 3.10 (aiogram, telethon, qrcode)\n` +
-            `⚡ <b>Supervision:</b> 24/7 Cloud Watchdog Active\n` +
+            `🌐 <b>Website:</b> Viewable in real-time on website dashboard!\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `✅ <i>Your script is now running in the background 24/7!</i>`,
+            `✅ <i>Your script is now running 24/7!</i>`,
             {
               chat_id: chatId,
               message_id: waitMsg.message_id,
@@ -136,8 +188,9 @@ export function setupTeleHostTelegramBot(
             `🤖 <b>Project Name:</b> <code>${deployedBot.name}</code>\n` +
             `🆔 <b>Worker ID:</b> <code>${deployedBot.id}</code>\n` +
             `📊 <b>Status:</b> 🟢 <b>RUNNING (PID: ${deployedBot.pid || 'Active'})</b>\n` +
+            `🌐 <b>Website:</b> Viewable in real-time on website dashboard!\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `✅ <i>Extracted requirements and started 24/7 background execution!</i>`,
+            `✅ <i>Extracted project and started 24/7 background execution!</i>`,
             {
               chat_id: chatId,
               message_id: waitMsg.message_id,
@@ -147,41 +200,54 @@ export function setupTeleHostTelegramBot(
           );
           addLog(botId, 'SUCCESS', `User @${senderUsername} hosted ZIP Bot "${fileName}" (${deployedBot.id}) via Telegram.`);
           return;
-        } else {
-          recordFileSubmission({
-            botId,
-            senderId,
+        } else if (fileName.endsWith('.html')) {
+          const htmlText = fileBuffer.toString('utf-8');
+          const proj = await deploySingleHtml(htmlText, {
+            name: fileName.replace(/\.html$/i, ''),
+            originalFileName: fileName,
             senderUsername,
-            fileName,
-            fileSizeMB,
-            mimeType: 'application/octet-stream',
-            caption: msg.caption || '',
-            status: 'COMPLETED',
-            reason: 'User file uploaded via Telegram',
-            localFilePath: path.join(process.cwd(), 'downloads', 'bot_master_primary', fileName)
+            senderId,
+            sourceType: 'telegram_bot',
+            botId
           });
 
           await bot.editMessageText(
-            `📥 <b>File Saved Successfully!</b>\n` +
+            `🎉 <b>HTML WEBSITE HOSTED LIVE!</b>\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `📄 <b>File Name:</b> <code>${fileName}</code>\n` +
-            `📊 <b>Size:</b> ${fileSizeMB} MB\n` +
-            `👤 <b>Sender:</b> @${senderUsername}\n` +
+            `📄 <b>Page Name:</b> <code>${fileName}</code>\n` +
+            `🌐 <b>Live URL:</b> ${proj.liveUrl}\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `✅ <i>File is saved on server and visible in your TeleHost Web Console!</i>`,
+            `✅ <i>Site is live and viewable in real-time on website dashboard!</i>`,
             {
               chat_id: chatId,
               message_id: waitMsg.message_id,
               parse_mode: 'HTML'
             }
           );
-          addLog(botId, 'INFO', `User @${senderUsername} uploaded file "${fileName}" (${fileSizeMB} MB).`);
+          return;
+        } else {
+          await bot.editMessageText(
+            `✅ <b>FILE SAVED IN REAL-TIME!</b>\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `📦 <b>File Name:</b> <code>${fileName}</code>\n` +
+            `💾 <b>File Size:</b> ${fileSizeMB} MB\n` +
+            `👤 <b>Uploaded By:</b> @${senderUsername}\n` +
+            `🌐 <b>Website Status:</b> Live on dashboard (can be downloaded or deleted anytime)\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `✅ <i>File saved safely to cloud storage!</i>`,
+            {
+              chat_id: chatId,
+              message_id: waitMsg.message_id,
+              parse_mode: 'HTML'
+            }
+          );
+          addLog(botId, 'SUCCESS', `User @${senderUsername} uploaded file "${fileName}" (${fileSizeMB} MB) to cloud storage.`);
           return;
         }
       } catch (err: any) {
-        console.error('[Document hosting error]', err);
+        console.error('[Document processing error]', err);
         await bot.editMessageText(
-          `❌ <b>Hosting Failed:</b> ${err.message}`,
+          `❌ <b>Processing Failed:</b> ${err.message}`,
           {
             chat_id: chatId,
             message_id: waitMsg.message_id,

@@ -9,6 +9,7 @@ import { RulesManagerView } from './components/RulesManagerView';
 import { HostingGuideView } from './components/HostingGuideView';
 import { HostedProjectsView } from './components/HostedProjectsView';
 import { HostedPythonBotsView } from './components/HostedPythonBotsView';
+import { ReceivedFilesView } from './components/ReceivedFilesView';
 import { NewBotModal } from './components/NewBotModal';
 import { TelegramConnectModal } from './components/TelegramConnectModal';
 import { EditBotModal } from './components/EditBotModal';
@@ -28,7 +29,8 @@ import {
   X,
   ArrowLeft,
   ChevronLeft,
-  Home
+  Home,
+  FolderDown
 } from 'lucide-react';
 
 export default function App() {
@@ -39,7 +41,7 @@ export default function App() {
   const [hostedPythonBots, setHostedPythonBots] = useState<HostedPythonBot[]>([]);
 
   // Default active tab: 'python_bots' for Python Telegram Bot Hosting
-  type NavOption = 'python_bots' | 'hosted_sites' | 'dashboard' | 'code' | 'simulator' | 'rules' | 'guide' | 'ff_panel';
+  type NavOption = 'python_bots' | 'received_files' | 'hosted_sites' | 'dashboard' | 'code' | 'simulator' | 'rules' | 'guide' | 'ff_panel';
   const [activeNav, setActiveNavState] = useState<NavOption>('python_bots');
   const [navHistory, setNavHistory] = useState<NavOption[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>(INITIAL_BOTS[0]?.id || '');
@@ -163,12 +165,8 @@ export default function App() {
               });
             });
           }
-          if (data.submissions && data.submissions.length > 0) {
-            setSubmissions(prev => {
-              const ids = new Set(prev.map(s => s.id));
-              const newItems = data.submissions.filter((s: any) => !ids.has(s.id));
-              return newItems.length > 0 ? [...newItems, ...prev] : prev;
-            });
+          if (data.submissions && Array.isArray(data.submissions)) {
+            setSubmissions(data.submissions);
           }
           if (data.logs && data.logs.length > 0) {
             setLogs(prev => {
@@ -241,8 +239,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/python-bots/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        setHostedPythonBots(prev => prev.filter(b => b.id !== id && b.name !== id && b.originalFileName !== id));
-        setSubmissions(prev => prev.filter(s => s.id !== id && s.fileName !== id));
+        setHostedPythonBots(prev => prev.filter(b => b.id !== id));
       }
     } catch (e) {
       console.error('Error deleting python bot:', e);
@@ -505,25 +502,6 @@ export default function App() {
     setBots(prev => prev.filter(b => b.id !== botId));
   };
 
-  const handleDeleteSubmission = async (id: string) => {
-    try {
-      const res = await fetch(`/api/submissions/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setSubmissions(prev => prev.filter(s => s.id !== id && s.fileName !== id));
-        setHostedPythonBots(prev => prev.filter(b => b.id !== id && b.name !== id && b.originalFileName !== id));
-      }
-    } catch (_) {}
-  };
-
-  const handleClearAllSubmissions = async () => {
-    try {
-      const res = await fetch('/api/submissions', { method: 'DELETE' });
-      if (res.ok) {
-        setSubmissions([]);
-      }
-    } catch (_) {}
-  };
-
   // Add New Bot
   const handleAddBot = async (newBot: HostedBot) => {
     setBots(prev => [newBot, ...prev]);
@@ -600,6 +578,18 @@ export default function App() {
       }
       return sub;
     }));
+  };
+
+  // Delete File Submission / Download
+  const handleDeleteSubmission = async (submissionId: string) => {
+    try {
+      const res = await fetch(`/api/submissions/${submissionId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSubmissions(prev => prev.filter(s => s.id !== submissionId));
+      }
+    } catch (e) {
+      console.error('Error deleting submission:', e);
+    }
   };
 
   // Delete Hosted Web Site
@@ -712,6 +702,23 @@ export default function App() {
               {hostedPythonBots.length > 0 && (
                 <span className="ml-1 px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-500/30 text-[10px]">
                   {hostedPythonBots.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveNav('received_files')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl transition-all whitespace-nowrap ${
+                activeNav === 'received_files'
+                  ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/25 font-bold'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <FolderDown className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Received Files</span>
+              {submissions.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/30 text-[10px]">
+                  {submissions.length}
                 </span>
               )}
             </button>
@@ -999,10 +1006,8 @@ export default function App() {
             bots={hostedPythonBots}
             masterBots={bots}
             submissions={submissions}
-            onRefresh={() => {
-              fetchHostedPythonBots();
-              fetchHostedProjects();
-            }}
+            onDeleteSubmission={handleDeleteSubmission}
+            onRefresh={fetchHostedPythonBots}
             onStartBot={handleStartPythonBot}
             onStopBot={handleStopPythonBot}
             onDeleteBot={handleDeletePythonBot}
@@ -1011,8 +1016,15 @@ export default function App() {
             onDeployCode={handleDeployPythonCode}
             onConnectToken={handleConnectMasterBotToken}
             onNavigateBack={handleGoBack}
+          />
+        )}
+
+        {activeNav === 'received_files' && (
+          <ReceivedFilesView
+            submissions={submissions}
             onDeleteSubmission={handleDeleteSubmission}
-            onClearAllSubmissions={handleClearAllSubmissions}
+            onRefresh={fetchHostedPythonBots}
+            onNavigateBack={handleGoBack}
           />
         )}
 
@@ -1053,6 +1065,7 @@ export default function App() {
               setIsEditBotModalOpen(true);
             }}
             onDeleteBot={handleDeleteMasterBot}
+            onDeleteSubmission={handleDeleteSubmission}
           />
         )}
 

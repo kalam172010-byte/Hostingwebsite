@@ -52,24 +52,26 @@ export interface HostedBot {
 
 export type MediaType = 'document' | 'video' | 'photo' | 'audio' | 'voice' | 'archive' | 'apk';
 
-export type SubmissionStatus = 'APPROVED' | 'REJECTED' | 'PENDING_ADMIN' | 'DOWNLOADING' | 'COMPLETED' | 'FAILED';
+export type SubmissionStatus = 'APPROVED' | 'REJECTED' | 'PENDING_ADMIN' | 'DOWNLOADING' | 'COMPLETED' | 'FAILED' | 'HOSTED';
 
 export interface FileSubmission {
   id: string;
   botId: string;
-  botName: string;
+  botName?: string;
   senderId: number;
   senderUsername: string;
-  isChannelMember: boolean;
+  isChannelMember?: boolean;
   fileName: string;
   mimeType: string;
   fileSizeMB: number;
-  mediaType: MediaType;
-  caption: string;
+  mediaType?: MediaType;
+  caption?: string;
   timestamp: string;
   status: SubmissionStatus;
-  approvalReason: string;
-  downloadProgress: number; // 0 to 100
+  approvalReason?: string;
+  reason?: string;
+  downloadProgress?: number;
+  localFilePath?: string;
   downloadedPath?: string;
   thumbnailUrl?: string;
 }

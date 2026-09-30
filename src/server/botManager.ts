@@ -90,8 +90,10 @@ export interface LiveSubmission {
   caption: string;
   status: 'APPROVED' | 'REJECTED' | 'PENDING_ADMIN' | 'COMPLETED' | 'HOSTED';
   reason: string;
+  approvalReason?: string;
   timestamp: string;
   localFilePath?: string;
+  downloadedPath?: string;
   hostedUrl?: string;
 }
 
@@ -347,84 +349,6 @@ export function loadManifests() {
         });
       }
     }
-
-    // Auto-discover user files in downloads/ directory and subfolders
-    if (fs.existsSync(downloadsRootDir)) {
-      try {
-        const scanAndImport = (dir: string) => {
-          const files = fs.readdirSync(dir);
-          for (const file of files) {
-            const fullPath = path.join(dir, file);
-            if (file === '.' || file === '..' || file === '__pycache__') continue;
-            try {
-              const stat = fs.statSync(fullPath);
-              if (stat.isDirectory()) {
-                scanAndImport(fullPath);
-              } else if (file.endsWith('.py')) {
-                // Ensure in liveSubmissions
-                if (!liveSubmissions.some(s => s.fileName === file || s.localFilePath === fullPath)) {
-                  liveSubmissions.push({
-                    id: 'sub_' + Math.random().toString(36).substring(2, 8) + '_' + Date.now().toString(36),
-                    botId: 'bot_master_primary',
-                    senderId: 8808556338,
-                    senderUsername: 'Akash_12121',
-                    fileName: file,
-                    fileSizeMB: Number((stat.size / (1024 * 1024)).toFixed(3)),
-                    mimeType: 'text/x-python',
-                    caption: 'User Python Bot Script',
-                    status: 'HOSTED',
-                    reason: 'Auto-discovered user bot file',
-                    timestamp: new Date(stat.mtime).toLocaleTimeString(),
-                    localFilePath: fullPath
-                  });
-                }
-
-                // Ensure in hostedPythonBots
-                if (!hostedPythonBots.some(b => b.originalFileName === file || b.name === file || b.entryFile === file)) {
-                  const pybotId = 'pybot_' + file.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase().substring(0, 20) + '_' + Date.now().toString(36);
-                  const targetDir = path.join(hostedPythonBotsDir, pybotId);
-                  if (!fs.existsSync(targetDir)) {
-                    fs.mkdirSync(targetDir, { recursive: true });
-                  }
-                  const targetFile = path.join(targetDir, file);
-                  if (!fs.existsSync(targetFile)) {
-                    fs.copyFileSync(fullPath, targetFile);
-                  }
-                  hostedPythonBots.push({
-                    id: pybotId,
-                    name: file,
-                    entryFile: file,
-                    sourceType: 'telegram_bot',
-                    senderUsername: 'Akash_12121',
-                    senderId: 8808556338,
-                    originalFileName: file,
-                    fileSizeMB: Number((stat.size / (1024 * 1024)).toFixed(3)),
-                    status: 'RUNNING',
-                    startedAt: new Date().toLocaleTimeString(),
-                    uptimeSeconds: 0,
-                    envVars: {
-                      FAMPAY_API_KEY: 'fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e',
-                      PAYMENT_GATEWAY_TOKEN: 'fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e'
-                    },
-                    logs: [
-                      `[SYSTEM] Auto-discovered user bot file: ${file}`,
-                      `[SYSTEM] Ready and active 24/7`
-                    ],
-                    description: `User bot file: ${file}`,
-                    botId: 'bot_master_primary'
-                  });
-                }
-              }
-            } catch (_) {}
-          }
-        };
-        scanAndImport(downloadsRootDir);
-        saveManifests();
-      } catch (err) {
-        console.warn('[Downloads auto-discover notice]', err);
-      }
-    }
-
     loadDailyUploadsManifest();
 
     // Auto-resume Hosted Python Bots on boot
@@ -469,7 +393,11 @@ export function loadManifests() {
 loadManifests();
 
 export function getHostedProjects(): HostedProject[] {
-  return hostedProjects.map(p => ({
+  autoDiscoverHostedProjects();
+  return hostedProjects.filter(p => {
+    const dir = path.join(hostedSitesRootDir, p.id);
+    return fs.existsSync(dir);
+  }).map(p => ({
     ...p,
     liveUrl: `${serverBaseUrl}/sites/${p.id}/`
   }));
@@ -573,25 +501,96 @@ export async function deploySingleHtml(
 }
 
 export function deleteHostedProject(id: string): boolean {
-  const idx = hostedProjects.findIndex(p => p.id === id || p.name === id);
-  let removedId = id;
-  if (idx !== -1) {
-    const removed = hostedProjects.splice(idx, 1)[0];
-    removedId = removed.id;
-  }
-  const targetDir = path.join(hostedSitesRootDir, removedId);
-  if (fs.existsSync(targetDir)) {
-    try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch (_) {}
-  }
-  const directDir = path.join(hostedSitesRootDir, id);
-  if (fs.existsSync(directDir)) {
-    try { fs.rmSync(directDir, { recursive: true, force: true }); } catch (_) {}
-  }
-  saveManifests();
+  const idx = hostedProjects.findIndex(p => p.id === id);
+  if (idx === -1) return false;
+  hostedProjects.splice(idx, 1);
   return true;
 }
 
+export function autoDiscoverHostedPythonBots() {
+  try {
+    if (!fs.existsSync(hostedPythonBotsDir)) return;
+    const dirs = fs.readdirSync(hostedPythonBotsDir);
+    for (const d of dirs) {
+      if (d === 'manifest.json' || d.startsWith('.')) continue;
+      const fullDir = path.join(hostedPythonBotsDir, d);
+      try {
+        if (!fs.statSync(fullDir).isDirectory()) continue;
+      } catch (_) {
+        continue;
+      }
+
+      const exists = hostedPythonBots.some(b => b.id === d);
+      if (!exists) {
+        const files = fs.readdirSync(fullDir);
+        const pyFiles = files.filter(f => f.endsWith('.py'));
+        if (pyFiles.length === 0) continue;
+        const entryFile = pyFiles.includes('main.py') ? 'main.py' : (pyFiles.includes('bot.py') ? 'bot.py' : pyFiles[0]);
+        
+        const botInfo: HostedPythonBot = {
+          id: d,
+          name: entryFile,
+          entryFile,
+          sourceType: 'web_upload',
+          senderUsername: 'cloud_user',
+          originalFileName: entryFile,
+          fileSizeMB: 0.1,
+          status: 'RUNNING',
+          startedAt: new Date().toLocaleTimeString(),
+          uptimeSeconds: 0,
+          logs: [`[SYSTEM] Auto-discovered bot folder "${d}" on disk.`],
+          description: `Auto-discovered Python bot (${entryFile})`
+        };
+        hostedPythonBots.push(botInfo);
+        spawnPythonBotProcess(botInfo);
+      }
+    }
+  } catch (err) {
+    console.warn('[Auto-discover python bots error]', err);
+  }
+}
+
+export function autoDiscoverHostedProjects() {
+  try {
+    if (!fs.existsSync(hostedSitesRootDir)) return;
+    const dirs = fs.readdirSync(hostedSitesRootDir);
+    for (const d of dirs) {
+      if (d === 'manifest.json' || d.startsWith('.')) continue;
+      const fullDir = path.join(hostedSitesRootDir, d);
+      try {
+        if (!fs.statSync(fullDir).isDirectory()) continue;
+      } catch (_) {
+        continue;
+      }
+
+      const exists = hostedProjects.some(p => p.id === d);
+      if (!exists) {
+        const files = fs.readdirSync(fullDir);
+        const project: HostedProject = {
+          id: d,
+          name: d,
+          sourceType: 'web_upload',
+          senderUsername: 'cloud_user',
+          originalFileName: 'index.html',
+          fileSizeMB: 0.1,
+          filesCount: files.length,
+          filesList: files,
+          liveUrl: `${serverBaseUrl}/sites/${d}/`,
+          previewPath: `/sites/${d}/`,
+          createdAt: new Date().toLocaleTimeString(),
+          status: 'ONLINE',
+          description: `Hosted Web Project (${files.length} files)`
+        };
+        hostedProjects.push(project);
+      }
+    }
+  } catch (err) {
+    console.warn('[Auto-discover hosted projects error]', err);
+  }
+}
+
 export function getHostedPythonBots(): HostedPythonBot[] {
+  autoDiscoverHostedPythonBots();
   return hostedPythonBots.filter(b => {
     const dir = path.join(hostedPythonBotsDir, b.id);
     return fs.existsSync(dir);
@@ -602,71 +601,129 @@ export function getLiveLogs() {
   return liveLogs;
 }
 
-export function getLiveSubmissions() {
-  return liveSubmissions;
+const SYSTEM_IGNORED_FILES = new Set([
+  'Procfile', 'render.yaml', 'requirements.txt', 'get-pip.py', 'Dockerfile',
+  '.dockerignore', '.gitignore', 'Cuibcc.db', 'master_bots.json', 'daily_uploads.json',
+  'manifest.json', 'server.js', 'server.ts', 'run-server.js', 'index.html', 'package.json',
+  'tsconfig.json', 'vite.config.ts', 'Main_QR_PAYMENT_ALL_FIXED.py', 'Main_QR_PAYMENT_ALL_FIXED-1_FULL_FIXED (1).py'
+]);
+
+export function autoDiscoverDownloads() {
+  try {
+    const scanDir = (dirPath: string) => {
+      if (!fs.existsSync(dirPath)) return;
+      const entries = fs.readdirSync(dirPath);
+      for (const entry of entries) {
+        if (SYSTEM_IGNORED_FILES.has(entry) || entry.endsWith('.json') || entry.endsWith('.pyc') || entry.endsWith('.db')) {
+          continue;
+        }
+
+        const fullPath = path.join(dirPath, entry);
+        let stat;
+        try {
+          stat = fs.statSync(fullPath);
+        } catch (_) {
+          continue;
+        }
+
+        if (stat.isDirectory()) {
+          if (entry !== 'node_modules' && entry !== '__pycache__' && entry !== '.git' && entry !== 'hosted_python_bots') {
+            scanDir(fullPath);
+          }
+        } else if (stat.isFile()) {
+          const exists = liveSubmissions.some(s => 
+            s.localFilePath === fullPath || 
+            s.downloadedPath === fullPath || 
+            (s.fileName === entry && Math.abs((s.fileSizeMB || 0) - Number((stat.size / (1024 * 1024)).toFixed(3))) < 0.005)
+          );
+
+          if (!exists) {
+            const sizeMB = Number((stat.size / (1024 * 1024)).toFixed(3));
+            const mtime = stat.mtime ? new Date(stat.mtime).toLocaleTimeString() : new Date().toLocaleTimeString();
+            
+            let mime = 'application/octet-stream';
+            if (entry.endsWith('.py')) mime = 'text/x-python';
+            else if (entry.endsWith('.zip')) mime = 'application/zip';
+            else if (entry.endsWith('.html')) mime = 'text/html';
+            else if (entry.endsWith('.jpg') || entry.endsWith('.jpeg')) mime = 'image/jpeg';
+            else if (entry.endsWith('.png')) mime = 'image/png';
+            else if (entry.endsWith('.mp4')) mime = 'video/mp4';
+
+            liveSubmissions.unshift({
+              id: `sub_disc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              botId: 'bot_primary',
+              senderId: 8808556338,
+              senderUsername: 'TelegramUser',
+              fileName: entry,
+              fileSizeMB: sizeMB > 0 ? sizeMB : 0.01,
+              mimeType: mime,
+              caption: `Received file in cloud downloads`,
+              status: 'COMPLETED',
+              reason: 'Received in cloud storage',
+              approvalReason: 'Received in cloud storage',
+              timestamp: mtime,
+              localFilePath: fullPath,
+              downloadedPath: fullPath
+            });
+          }
+        }
+      }
+    };
+
+    scanDir(downloadsRootDir);
+  } catch (err) {
+    console.warn('[Auto-discover downloads error]', err);
+  }
 }
 
-export function recordFileSubmission(sub: Partial<LiveSubmission> & { fileName: string; botId?: string; senderUsername?: string }): LiveSubmission {
-  const newSub: LiveSubmission = {
-    id: sub.id || `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    botId: sub.botId || 'bot_master_primary',
-    senderId: sub.senderId || 0,
-    senderUsername: sub.senderUsername || 'anonymous',
-    fileName: sub.fileName,
-    fileSizeMB: sub.fileSizeMB || 0.01,
-    mimeType: sub.mimeType || 'text/plain',
-    caption: sub.caption || '',
-    status: sub.status || 'HOSTED',
-    reason: sub.reason || 'User upload via Telegram',
-    timestamp: sub.timestamp || new Date().toLocaleTimeString(),
-    localFilePath: sub.localFilePath,
-    hostedUrl: sub.hostedUrl
-  };
-  liveSubmissions.unshift(newSub);
-  saveManifests();
-  return newSub;
+export function getLiveSubmissions() {
+  autoDiscoverDownloads();
+  // Filter out dead paths pointing to unmapped old system directories
+  return liveSubmissions.filter(s => {
+    if (s.localFilePath && s.localFilePath.startsWith('/app/applet') && !fs.existsSync(s.localFilePath)) {
+      // Fix relative path if exists in cwd
+      const relName = path.basename(s.localFilePath);
+      const possiblePath = path.join(downloadsRootDir, 'bot_master_primary', relName);
+      if (fs.existsSync(possiblePath)) {
+        s.localFilePath = possiblePath;
+        s.downloadedPath = possiblePath;
+        return true;
+      }
+      return false;
+    }
+    return true;
+  });
+}
+
+export function addSubmission(sub: LiveSubmission) {
+  // Prevent duplicate insertion with same ID
+  if (!liveSubmissions.some(s => s.id === sub.id)) {
+    liveSubmissions.unshift(sub);
+    if (liveSubmissions.length > 500) liveSubmissions.pop();
+    saveManifests();
+    addLog(sub.botId || 'bot_primary', 'SUCCESS', `📁 Real-time file received from @${sub.senderUsername}: "${sub.fileName}" (${sub.fileSizeMB} MB)`);
+  }
 }
 
 export function deleteSubmission(id: string): boolean {
-  const index = liveSubmissions.findIndex(s => s.id === id || s.fileName === id || s.localFilePath === id);
-  let fileName = id;
-  if (index !== -1) {
-    const removed = liveSubmissions.splice(index, 1)[0];
-    fileName = removed.fileName;
-    if (removed.localFilePath && fs.existsSync(removed.localFilePath)) {
-      try { fs.unlinkSync(removed.localFilePath); } catch (_) {}
-    }
-  }
+  const idx = liveSubmissions.findIndex(s => s.id === id);
+  if (idx === -1) return false;
+  const removed = liveSubmissions.splice(idx, 1)[0];
 
-  // Delete matching files from all possible download folders
-  const diskCandidates = [
-    path.resolve(downloadsRootDir, fileName),
-    path.resolve(downloadsRootDir, 'bot_master_primary', fileName),
-    path.resolve(downloadsRootDir, 'bot_primary', fileName)
-  ];
-  for (const file of diskCandidates) {
-    if (fs.existsSync(file)) {
-      try { fs.unlinkSync(file); } catch (_) {}
-    }
-  }
-
-  saveManifests();
-  return true;
-}
-
-export function clearAllSubmissions(): boolean {
-  liveSubmissions.length = 0;
-  if (fs.existsSync(downloadsRootDir)) {
-    try {
-      const items = fs.readdirSync(downloadsRootDir);
-      for (const item of items) {
-        if (item === 'manifest.json' || item === 'master_bots.json' || item === 'daily_uploads.json') continue;
-        const p = path.join(downloadsRootDir, item);
-        fs.rmSync(p, { recursive: true, force: true });
+  // Physically delete file from disk
+  const pathsToCheck = [removed.localFilePath, removed.downloadedPath].filter(Boolean) as string[];
+  for (const filePath of pathsToCheck) {
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (e: any) {
+        console.warn('[File delete notice]', e.message);
       }
-    } catch (_) {}
+    }
   }
+
   saveManifests();
+  addLog(removed.botId || 'bot_primary', 'WARN', `🗑️ Deleted file submission "${removed.fileName}" (${id}) from website & server.`);
   return true;
 }
 
@@ -726,10 +783,52 @@ const PACKAGE_ALIAS_MAP: Record<string, string> = {
 };
 
 export async function healPythonCodeWithAI(
-  _code: string,
-  _errorTraceback: string
+  code: string,
+  errorTraceback: string
 ): Promise<{ success: boolean; healedCode?: string; explanation?: string }> {
-  // Deterministic local repairs are used offline to avoid external API quota limits.
+  try {
+    const prompt = `You are an expert Python engineer and compiler assistant.
+A Python Telegram bot crashed or failed with this error:
+--- ERROR TRACEBACK ---
+${errorTraceback.slice(-1500)}
+--- END ERROR TRACEBACK ---
+
+Here is the source Python file:
+--- PYTHON SOURCE CODE ---
+${code}
+--- END PYTHON SOURCE CODE ---
+
+TASK:
+Fix the syntax errors, unescaped f-string quotes, indentation, missing imports, unhandled exceptions, or event-loop conflicts so this Python script runs smoothly without crashing.
+CRITICAL RULES:
+1. Return ONLY the complete, executable Python code.
+2. DO NOT wrap in markdown \`\`\` blocks.
+3. Preserve all original bot commands, token logic, message handlers, and feature logic.
+4. Ensure all required imports (os, sys, json, time, asyncio, telebot/aiogram/telethon, etc.) are present.
+`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+    });
+
+    let healedText = response.text ? response.text.trim() : '';
+    if (healedText.startsWith('```python')) {
+      healedText = healedText.replace(/^```python\s*/i, '').replace(/```$/i, '').trim();
+    } else if (healedText.startsWith('```')) {
+      healedText = healedText.replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+    }
+
+    if (healedText && healedText.length > 20) {
+      return {
+        success: true,
+        healedCode: healedText,
+        explanation: 'AI intelligent repair resolved syntax/runtime exceptions'
+      };
+    }
+  } catch (err: any) {
+    console.warn('[TeleHost AI Auto-Healer Warning]', err?.message || err);
+  }
   return { success: false };
 }
 
@@ -1018,7 +1117,31 @@ async def http_request(method: str, url: str, headers: Optional[Dict[str, str]] 
     }
   }
 
-  // 4. SYNTAX ERROR / F-STRING NESTED QUOTES ERROR
+  // 4. 409 CONFLICT HANDOVER: "TelegramConflictError", "409 Conflict", "terminated by other getUpdates request"
+  if (stderrLog.includes('Conflict') || stderrLog.includes('409') || stderrLog.includes('getUpdates')) {
+    botInfo.logs.push(`[AUTO-HEALER] 🔄 409 Polling Conflict detected! Handing over full polling control to Python Bot...`);
+    try {
+      const scriptCode = fs.readFileSync(scriptPath, 'utf-8');
+      const tokenMatch = scriptCode.match(/([0-9]{8,11}:[a-zA-Z0-9_-]{35})/);
+      const pyToken = tokenMatch ? tokenMatch[1] : (botInfo.envVars?.BOT_TOKEN || "8632912098:AAENMDr-tkYBDsgl5MkA8SAt_3qOgnpL8j8");
+      
+      await clearTelegramWebhook(pyToken);
+      for (const [mBotId, mBot] of activeBots.entries()) {
+        if (mBot.info && mBot.info.token === pyToken) {
+          stopRealBot(mBotId);
+          botInfo.logs.push(`[AUTO-HEALER] ⏸️ Paused Node.js master bot ${mBotId} to grant exclusive polling access to user Python bot.`);
+        }
+      }
+      botInfo.consecutiveCrashCount = 0;
+      await new Promise(r => setTimeout(r, 1500));
+      spawnPythonBotProcess(botInfo);
+      return true;
+    } catch (e: any) {
+      botInfo.logs.push(`[AUTO-HEALER] ⚠️ 409 Conflict handover notice: ${e.message}`);
+    }
+  }
+
+  // 5. SYNTAX ERROR / F-STRING NESTED QUOTES ERROR
   if (stderrLog.includes('SyntaxError') || stderrLog.includes('f-string') || stderrLog.includes('IndentationError')) {
     botInfo.logs.push(`[AUTO-HEALER] 🛠️ Syntax/Indentation error detected! Auto-sanitizing code...`);
     try {
@@ -1035,20 +1158,20 @@ async def http_request(method: str, url: str, headers: Optional[Dict[str, str]] 
     }
   }
 
-  // 5. ADVANCED AI CODE REPAIR (Heals any remaining unhandled Python exceptions, max 1 attempt per bot session)
-  if (!(botInfo as any)._aiHealAttempted) {
-    (botInfo as any)._aiHealAttempted = true;
-    try {
-      const currentCode = fs.readFileSync(scriptPath, 'utf-8');
-      const aiFixResult = await healPythonCodeWithAI(currentCode, stderrLog);
-      if (aiFixResult.success && aiFixResult.healedCode && aiFixResult.healedCode !== currentCode) {
-        fs.writeFileSync(scriptPath, aiFixResult.healedCode, 'utf-8');
-        botInfo.logs.push(`[AUTO-HEALER] 🌟 [AI AUTONOMOUS REPAIR] ${aiFixResult.explanation || 'Code successfully repaired and compiled'}. Relaunching worker...`);
-        addLog(botInfo.botId || 'python_engine', 'SUCCESS', `[AUTO-HEALED] AI successfully fixed "${botInfo.name}" (${botInfo.id})!`);
-        spawnPythonBotProcess(botInfo);
-        return true;
-      }
-    } catch (_) {}
+  // 5. ADVANCED AI CODE REPAIR (Heals any remaining unhandled Python exceptions)
+  botInfo.logs.push(`[AUTO-HEALER] 🤖 Analyzing traceback and initiating AI autonomous code repair...`);
+  try {
+    const currentCode = fs.readFileSync(scriptPath, 'utf-8');
+    const aiFixResult = await healPythonCodeWithAI(currentCode, stderrLog);
+    if (aiFixResult.success && aiFixResult.healedCode && aiFixResult.healedCode !== currentCode) {
+      fs.writeFileSync(scriptPath, aiFixResult.healedCode, 'utf-8');
+      botInfo.logs.push(`[AUTO-HEALER] 🌟 [AI AUTONOMOUS REPAIR] ${aiFixResult.explanation || 'Code successfully repaired and compiled'}. Relaunching worker...`);
+      addLog(botInfo.botId || 'python_engine', 'SUCCESS', `[AUTO-HEALED] AI successfully fixed "${botInfo.name}" (${botInfo.id})!`);
+      spawnPythonBotProcess(botInfo);
+      return true;
+    }
+  } catch (aiErr: any) {
+    botInfo.logs.push(`[AUTO-HEALER] ⚠️ AI healing pass notice: ${aiErr.message}`);
   }
 
   return false;
@@ -1093,7 +1216,18 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
     runningProcesses.delete(botInfo.id);
   }
 
+  // Remove stale session locks if present
   try {
+    const files = fs.readdirSync(botDir);
+    files.forEach(f => {
+      if (f.endsWith('.session-journal') || f.endsWith('.lock') || f.endsWith('.tmp')) {
+        try { fs.unlinkSync(path.join(botDir, f)); } catch (_) {}
+      }
+    });
+  } catch (_) {}
+
+  try {
+    const activeMasterToken = Array.from(activeBots.values())[0]?.info?.token || "8632912098:AAENMDr-tkYBDsgl5MkA8SAt_3qOgnpL8j8";
     const env = {
       ...process.env,
       PATH: `/root/.local/bin:${process.env.PATH || ''}:/usr/local/bin:/usr/bin:/bin`,
@@ -1101,6 +1235,7 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
       PYTHONIOENCODING: 'UTF-8',
       BOT_ID: botInfo.id,
       SENDER_USERNAME: botInfo.senderUsername || 'anonymous',
+      BOT_TOKEN: botInfo.envVars?.BOT_TOKEN || activeMasterToken,
       ...(botInfo.envVars || {})
     };
 
@@ -1283,22 +1418,22 @@ export async function deployPythonBotFromFile(
     Object.assign(previousEnvVars, prevBot.envVars);
   }
 
-  // Stop previously running bots with identical name or from the same sender to prevent Telegram 409 conflict
-  hostedPythonBots.forEach(oldBot => {
-    if (oldBot.id !== cleanId) {
-      if (oldBot.senderId === meta.senderId || oldBot.originalFileName === meta.originalFileName || oldBot.name === meta.name) {
-        stopPythonBot(oldBot.id);
-        oldBot.status = 'STOPPED';
-        oldBot.autoRestartEnabled = false;
-        oldBot.logs.push(`[SYSTEM] Stopped permanently to allow newer version (${cleanId}) to run without 409 token conflict.`);
-      }
-    }
-  });
-
-  // Check if the Python script uses a token identical to any running Node.js master bot
-  const tokenMatch = cleanCode.match(/(?:BOT_TOKEN|token|API_TOKEN)\s*=\s*['"]([0-9]{8,11}:[a-zA-Z0-9_-]{35})['"]/i);
+  // Check if newly deployed bot shares a BOT_TOKEN with any existing python bot to prevent 409 conflict
+  const tokenMatch = cleanCode.match(/([0-9]{8,11}:[a-zA-Z0-9_-]{35})/);
   if (tokenMatch) {
     const deployedToken = tokenMatch[1];
+    hostedPythonBots.forEach(oldBot => {
+      if (oldBot.id !== cleanId) {
+        const oldCode = fs.existsSync(path.join(hostedPythonBotsDir, oldBot.id, oldBot.entryFile))
+          ? fs.readFileSync(path.join(hostedPythonBotsDir, oldBot.id, oldBot.entryFile), 'utf-8')
+          : '';
+        if (oldCode.includes(deployedToken) || oldBot.envVars?.BOT_TOKEN === deployedToken) {
+          stopPythonBot(oldBot.id);
+          oldBot.logs.push(`[SYSTEM] Paused worker (${oldBot.id}) because newer deployment (${cleanId}) shares Telegram Bot Token.`);
+        }
+      }
+    });
+
     for (const [mBotId, mBot] of activeBots.entries()) {
       if (mBot.info && mBot.info.token === deployedToken) {
         console.log(`[Token Handover] Python Bot "${entryFileName}" uses token ${deployedToken}. Pausing Node.js bot ${mBotId} to prevent 409 Conflict.`);
@@ -1329,19 +1464,6 @@ export async function deployPythonBotFromFile(
   };
 
   hostedPythonBots.unshift(botInfo);
-  recordFileSubmission({
-    botId: meta.botId || 'bot_master_primary',
-    senderId: meta.senderId,
-    senderUsername: meta.senderUsername,
-    fileName: entryFileName,
-    fileSizeMB: botInfo.fileSizeMB,
-    mimeType: 'text/x-python',
-    caption: meta.description || '',
-    status: 'HOSTED',
-    reason: 'Auto-deployed as 24/7 Python Cloud Bot Worker',
-    localFilePath: path.join(botDir, entryFileName)
-  });
-  saveManifests();
 
   // Scan python code for imported libraries and install if missing
   try {
@@ -1465,19 +1587,6 @@ export async function deployPythonBotFromZip(
   }
 
   hostedPythonBots.unshift(botInfo);
-  recordFileSubmission({
-    botId: meta.botId || 'bot_master_primary',
-    senderId: meta.senderId,
-    senderUsername: meta.senderUsername,
-    fileName: meta.originalFileName,
-    fileSizeMB: botInfo.fileSizeMB,
-    mimeType: 'application/zip',
-    caption: meta.description || '',
-    status: 'HOSTED',
-    reason: 'ZIP Bot package auto-extracted & running 24/7',
-    localFilePath: path.join(botDir, meta.originalFileName)
-  });
-  saveManifests();
   return botInfo;
 }
 
@@ -1521,105 +1630,17 @@ export function stopPythonBot(id: string): boolean {
  */
 export function deletePythonBot(id: string): boolean {
   stopPythonBot(id);
+  const idx = hostedPythonBots.findIndex(b => b.id === id);
+  if (idx === -1) return false;
 
-  // Match by id, name, originalFileName, entryFile, or subfolder name
-  const idx = hostedPythonBots.findIndex(b => 
-    b.id === id || 
-    b.name === id || 
-    b.originalFileName === id || 
-    b.entryFile === id
-  );
-
-  let removedId = id;
-  let removedName = id;
-
-  if (idx !== -1) {
-    const removed = hostedPythonBots.splice(idx, 1)[0];
-    removedId = removed.id;
-    removedName = removed.name;
-  }
-
-  // Remove directory by removedId
-  const botDir = path.join(hostedPythonBotsDir, removedId);
+  const removed = hostedPythonBots.splice(idx, 1)[0];
+  const botDir = path.join(hostedPythonBotsDir, id);
   if (fs.existsSync(botDir)) {
-    try { fs.rmSync(botDir, { recursive: true, force: true }); } catch (_) {}
+    fs.rmSync(botDir, { recursive: true, force: true });
   }
 
-  // Remove directory by passed id if different
-  const directDir = path.join(hostedPythonBotsDir, id);
-  if (fs.existsSync(directDir)) {
-    try { fs.rmSync(directDir, { recursive: true, force: true }); } catch (_) {}
-  }
-
-  // Clean from hosted_python_bots subdirectories if matching filename
-  if (fs.existsSync(hostedPythonBotsDir)) {
-    try {
-      const items = fs.readdirSync(hostedPythonBotsDir);
-      for (const item of items) {
-        if (item === 'manifest.json') continue;
-        const subFolder = path.join(hostedPythonBotsDir, item);
-        if (fs.statSync(subFolder).isDirectory()) {
-          const files = fs.readdirSync(subFolder);
-          if (files.includes(id) || files.includes(removedName)) {
-            fs.rmSync(subFolder, { recursive: true, force: true });
-          }
-        }
-      }
-    } catch (_) {}
-  }
-
-  addLog('python_engine', 'WARN', `Permanently deleted hosted bot "${removedName}" (${removedId})`);
-  saveManifests();
+  addLog('python_engine', 'WARN', `Permanently deleted hosted bot "${removed.name}" (${id})`);
   return true;
-}
-
-/**
- * Completely wipe all hosted Python bots, submissions, and temporary download files
- * Leaves the platform fresh for new files.
- */
-export function wipeAllBotsAndSubmissions(): void {
-  // 1. Stop all running python bot processes
-  runningProcesses.forEach((proc) => {
-    try { proc.kill('SIGKILL'); } catch (_) {}
-  });
-  runningProcesses.clear();
-
-  // Clear all pending timeouts
-  pendingRestartTimeouts.forEach((t) => clearTimeout(t));
-  pendingRestartTimeouts.clear();
-
-  // 2. Clear hosted python bots
-  hostedPythonBots.length = 0;
-  if (fs.existsSync(hostedPythonBotsDir)) {
-    try {
-      const items = fs.readdirSync(hostedPythonBotsDir);
-      for (const item of items) {
-        if (item === 'manifest.json') continue;
-        const p = path.join(hostedPythonBotsDir, item);
-        fs.rmSync(p, { recursive: true, force: true });
-      }
-      fs.writeFileSync(path.join(hostedPythonBotsDir, 'manifest.json'), JSON.stringify([], null, 2));
-    } catch (_) {}
-  }
-
-  // 3. Clear user submissions
-  liveSubmissions.length = 0;
-  if (fs.existsSync(downloadsRootDir)) {
-    try {
-      const items = fs.readdirSync(downloadsRootDir);
-      for (const item of items) {
-        if (item === 'manifest.json' || item === 'master_bots.json' || item === 'daily_uploads.json') continue;
-        const p = path.join(downloadsRootDir, item);
-        fs.rmSync(p, { recursive: true, force: true });
-      }
-      fs.writeFileSync(path.join(downloadsRootDir, 'manifest.json'), JSON.stringify([], null, 2));
-    } catch (_) {}
-  }
-
-  // Clear logs
-  liveLogs.length = 0;
-  addLog('system', 'SUCCESS', 'All previous bots, scripts, and files wiped clean! Ready to add new file.');
-  saveManifests();
 }
 
 /**
@@ -2070,7 +2091,9 @@ process.on('SIGTERM', async () => {
 setInterval(async () => {
   // 1. Python Worker Processes Check
   hostedPythonBots.forEach(bot => {
-    if (bot.status === 'RUNNING' && bot.autoRestartEnabled !== false) {
+    if (bot.status !== 'STOPPED') {
+      bot.autoRestartEnabled = true;
+      bot.status = 'RUNNING';
       const proc = runningProcesses.get(bot.id);
       const hasPendingTimer = pendingRestartTimeouts.has(bot.id);
       
@@ -2084,13 +2107,12 @@ setInterval(async () => {
         }
       }
 
-      if (!isAlive) {
-        if (!hasPendingTimer && (bot.consecutiveCrashCount || 0) < 10) {
-          bot.logs.push(`[24/7 WATCHDOG] ⚡ Detected unresponsive/closed worker for "${bot.name}". Reviving process now...`);
-          addLog(bot.botId || 'python_engine', 'INFO', `[24/7 WATCHDOG] Reviving "${bot.name}" (${bot.id}) to ensure 24/7 continuous uptime.`);
-          spawnPythonBotProcess(bot);
-        }
-      } else {
+      if (!isAlive && !hasPendingTimer) {
+        bot.consecutiveCrashCount = 0;
+        bot.logs.push(`[24/7 WATCHDOG] ⚡ Reviving bot worker "${bot.name}" (${bot.id}) for continuous 24/7 uptime...`);
+        addLog(bot.botId || 'python_engine', 'INFO', `[24/7 WATCHDOG] Reviving "${bot.name}" (${bot.id}) to ensure 24/7 continuous uptime.`);
+        spawnPythonBotProcess(bot);
+      } else if (isAlive) {
         bot.uptimeSeconds = (bot.uptimeSeconds || 0) + 10;
       }
     }

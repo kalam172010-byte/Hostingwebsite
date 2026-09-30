@@ -36,6 +36,7 @@ interface DashboardViewProps {
   onOpenTelegramModal?: () => void;
   onEditBot?: (bot: HostedBot) => void;
   onDeleteBot?: (botId: string) => void;
+  onDeleteSubmission?: (submissionId: string) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -50,6 +51,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenTelegramModal,
   onEditBot,
   onDeleteBot,
+  onDeleteSubmission,
 }) => {
   const totalApproved = submissions.filter(s => s.status === 'COMPLETED' || s.status === 'APPROVED').length;
   const totalPending = submissions.filter(s => s.status === 'PENDING_ADMIN').length;
@@ -361,17 +363,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <td className="py-2.5 text-slate-400 font-sans text-[11px] max-w-[180px] truncate" title={sub.approvalReason}>
                         {sub.approvalReason}
                       </td>
-                      <td className="py-2.5 text-right font-sans">
+                      <td className="py-2.5 text-right font-sans flex items-center justify-end gap-2">
                         {sub.downloadedPath ? (
                           <a
                             href={`/api/bots/download-file?path=${encodeURIComponent(sub.downloadedPath)}`}
                             download
-                            className="inline-flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 underline font-medium"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-md transition-colors font-medium"
+                            title="Download File to Computer"
                           >
-                            <FolderDown className="w-3 h-3" /> Get File
+                            <FolderDown className="w-3.5 h-3.5" />
+                            <span>Download</span>
                           </a>
-                        ) : (
-                          <span className="text-slate-600 text-[11px]">-</span>
+                        ) : null}
+                        {onDeleteSubmission && (
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Are you sure you want to delete "${sub.fileName}" from the website and server disk?`)) {
+                                onDeleteSubmission(sub.id);
+                              }
+                            }}
+                            className="p-1.5 text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-md transition-colors"
+                            title="Delete File Permanently from Website & Server"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </td>
                     </tr>

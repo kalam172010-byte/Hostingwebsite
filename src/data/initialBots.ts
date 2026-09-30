@@ -41,25 +41,7 @@ export const INITIAL_BOTS: HostedBot[] = [
   }
 ];
 
-export const INITIAL_SUBMISSIONS: FileSubmission[] = [
-  {
-    id: 'sub_main_qr',
-    botId: 'bot_primary',
-    botName: 'AKASHFFPANEL1BOT',
-    senderId: 6933519842,
-    senderUsername: 'Akash_12121',
-    isChannelMember: true,
-    fileName: 'Main_QR_PAYMENT_ALL_FIXED.py',
-    mimeType: 'text/x-python',
-    fileSizeMB: 0.165,
-    mediaType: 'document',
-    caption: 'Payment QR automation bot',
-    timestamp: 'Just now',
-    status: 'COMPLETED',
-    approvalReason: 'Verified and deployed to Python Bot Engine',
-    downloadProgress: 100
-  }
-];
+export const INITIAL_SUBMISSIONS: FileSubmission[] = [];
 
 export const INITIAL_LOGS: BotLog[] = [
   {
