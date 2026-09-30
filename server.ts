@@ -288,6 +288,21 @@ app.post('/api/python-bots/:id/env', (req, res) => {
   res.json({ success });
 });
 
+// Direct Download for FREE_FIRE_SELLING_BOT_UPDATED.py
+app.get('/api/download/FREE_FIRE_SELLING_BOT_UPDATED.py', (_req, res) => {
+  const candidatePaths = [
+    path.resolve(process.cwd(), 'hosted_python_bots/pybot_ff_selling_bot/FREE_FIRE_SELLING_BOT_UPDATED.py'),
+    path.resolve(process.cwd(), 'downloads/bot_master_primary/FREE_FIRE_SELLING_BOT_UPDATED.py'),
+    path.resolve(process.cwd(), 'FREE_FIRE_SELLING_BOT_UPDATED.py')
+  ];
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      return res.download(p, 'FREE_FIRE_SELLING_BOT_UPDATED.py');
+    }
+  }
+  res.status(404).json({ error: 'Bot file not found on server.' });
+});
+
 // Download Python Bot File (.py / .zip)
 app.get('/api/python-bots/:id/download', (req, res) => {
   const botInfo = getPythonBotScriptPath(req.params.id);
@@ -369,10 +384,22 @@ app.get('/api/ff-panel/products', (_req, res) => {
 // 3. Create Product
 app.post('/api/ff-panel/products', (req, res) => {
   try {
-    const { category, name, price_inr, reseller_price, validity, device_limit, apk_link } = req.body;
+    const { category, name, panel_name, price_inr, reseller_price, validity, device_limit, apk_link, bantibhaiya_product_pid, bantibhaiya_product_duration } = req.body;
+    const pName = panel_name || name || 'General Panel';
     const result = queryDb(
-      'INSERT INTO products (category, name, price_inr, reseller_price, stock, apk_link, validity, device_limit, is_active) VALUES (?, ?, ?, ?, 10, ?, ?, ?, 1)',
-      [category || 'ANDROID NON ROOT PANEL', name, price_inr || 100, reseller_price || 80, apk_link || 'https://t.me/Akash_12121', validity || '1 Day', device_limit || '1 Device']
+      'INSERT INTO products (category, panel_name, name, price_inr, reseller_price, stock, apk_link, validity, device_limit, bantibhaiya_product_pid, bantibhaiya_product_duration, is_active) VALUES (?, ?, ?, ?, ?, 999, ?, ?, ?, ?, ?, 1)',
+      [
+        category || 'ANDROID NON ROOT PANEL',
+        pName,
+        name || '1 Day Plan',
+        price_inr || 100,
+        reseller_price || 80,
+        apk_link || '',
+        validity || '1 Day',
+        device_limit || '1 Device HWID',
+        bantibhaiya_product_pid || '',
+        bantibhaiya_product_duration || ''
+      ]
     );
     res.json({ success: true, id: result.lastrowid });
   } catch (err: any) {
@@ -803,7 +830,7 @@ Approval Rules: ${JSON.stringify(rules || {}, null, 2)}
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: userMessage,
       config: {
         systemInstruction,
@@ -913,7 +940,7 @@ app.post('/api/optimize-rules', async (req, res) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: `Analyze these file approval requirements for a Telethon Telegram bot: "${rulesDescription}".
 Suggest optimal structured approval rules.
 Return JSON in format:

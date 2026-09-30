@@ -280,6 +280,26 @@ export function saveManifests() {
 
 export function loadManifests() {
   try {
+    // Ensure pybot_ff_selling_bot directory has the script and database
+    const ffBotDir = path.join(hostedPythonBotsDir, 'pybot_ff_selling_bot');
+    if (!fs.existsSync(ffBotDir)) {
+      fs.mkdirSync(ffBotDir, { recursive: true });
+    }
+    const targetScript = path.join(ffBotDir, 'FREE_FIRE_SELLING_BOT_UPDATED.py');
+    const sourceScript = path.resolve(process.cwd(), 'downloads/bot_master_primary/FREE_FIRE_SELLING_BOT_UPDATED.py');
+    if (fs.existsSync(sourceScript)) {
+      try {
+        fs.copyFileSync(sourceScript, targetScript);
+      } catch (_) {}
+    }
+    const sourceDb = path.resolve(process.cwd(), 'Cuibcc.db');
+    const targetDb = path.join(ffBotDir, 'Cuibcc.db');
+    if (fs.existsSync(sourceDb) && !fs.existsSync(targetDb)) {
+      try {
+        fs.copyFileSync(sourceDb, targetDb);
+      } catch (_) {}
+    }
+
     if (fs.existsSync(pythonBotsManifestPath)) {
       try {
         const data = JSON.parse(fs.readFileSync(pythonBotsManifestPath, 'utf-8'));
@@ -292,41 +312,6 @@ export function loadManifests() {
           });
         }
       } catch (_) {}
-    }
-
-    // Auto-discover any bot directories that exist in hostedPythonBotsDir
-    if (fs.existsSync(hostedPythonBotsDir)) {
-      try {
-        const entries = fs.readdirSync(hostedPythonBotsDir);
-        for (const entry of entries) {
-          const fullPath = path.join(hostedPythonBotsDir, entry);
-          if (entry.startsWith('pybot_') && fs.statSync(fullPath).isDirectory()) {
-            if (!hostedPythonBots.some(b => b.id === entry)) {
-              const files = fs.readdirSync(fullPath);
-              const pyFile = files.find(f => f.endsWith('.py')) || 'bot.py';
-              const stat = fs.existsSync(path.join(fullPath, pyFile)) ? fs.statSync(path.join(fullPath, pyFile)) : null;
-              hostedPythonBots.push({
-                id: entry,
-                name: pyFile,
-                entryFile: pyFile,
-                sourceType: 'web_upload',
-                originalFileName: pyFile,
-                fileSizeMB: stat ? Number((stat.size / (1024 * 1024)).toFixed(3)) : 0.16,
-                status: 'RUNNING',
-                startedAt: new Date().toLocaleTimeString(),
-                uptimeSeconds: 0,
-                envVars: {
-                  FAMPAY_API_KEY: 'fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e',
-                  PAYMENT_GATEWAY_TOKEN: 'fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e'
-                },
-                logs: [`[SYSTEM] Auto-discovered workspace ${entry} (${pyFile})`]
-              });
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[Auto-discovery notice]', err);
-      }
     }
 
     if (fs.existsSync(hostedSitesManifestPath)) {
@@ -351,10 +336,10 @@ export function loadManifests() {
     }
     loadDailyUploadsManifest();
 
-    // Auto-resume Hosted Python Bots on boot
+    // Auto-resume Hosted Python Bots on boot ONLY if explicitly saved as RUNNING
     hostedPythonBots.forEach(b => {
-      if (b.status === 'RUNNING' || b.autoRestartEnabled !== false) {
-        console.log(`[Boot] Auto-resuming Python Bot "${b.name}" (${b.id})...`);
+      if (b.status === 'RUNNING') {
+        console.log(`[Boot] Resuming active Python Bot "${b.name}" (${b.id})...`);
         setTimeout(() => {
           spawnPythonBotProcess(b);
         }, 1000);
@@ -508,76 +493,14 @@ export function deleteHostedProject(id: string): boolean {
 }
 
 export function autoDiscoverHostedPythonBots() {
-  try {
-    if (fs.existsSync(hostedPythonBotsDir)) {
-      const dirs = fs.readdirSync(hostedPythonBotsDir);
-      for (const d of dirs) {
-        if (d === 'manifest.json' || d.startsWith('.')) continue;
-        const fullDir = path.join(hostedPythonBotsDir, d);
-        try {
-          if (!fs.statSync(fullDir).isDirectory()) continue;
-        } catch (_) {
-          continue;
-        }
-
-        const exists = hostedPythonBots.some(b => b.id === d);
-        if (!exists) {
-          const files = fs.readdirSync(fullDir);
-          const pyFiles = files.filter(f => f.endsWith('.py'));
-          if (pyFiles.length === 0) continue;
-          const entryFile = pyFiles.includes('main.py') ? 'main.py' : (pyFiles.includes('bot.py') ? 'bot.py' : pyFiles[0]);
-          
-          const botInfo: HostedPythonBot = {
-            id: d,
-            name: entryFile,
-            entryFile,
-            sourceType: 'web_upload',
-            senderUsername: 'cloud_user',
-            originalFileName: entryFile,
-            fileSizeMB: 0.1,
-            status: 'RUNNING',
-            startedAt: new Date().toLocaleTimeString(),
-            uptimeSeconds: 0,
-            logs: [`[SYSTEM] Auto-discovered bot folder "${d}" on disk.`],
-            description: `Auto-discovered Python bot (${entryFile})`
-          };
-          hostedPythonBots.push(botInfo);
-          spawnPythonBotProcess(botInfo);
-        }
-      }
+  // Sync state: prune any bots whose directory no longer exists
+  for (let i = hostedPythonBots.length - 1; i >= 0; i--) {
+    const b = hostedPythonBots[i];
+    const fullDir = path.join(hostedPythonBotsDir, b.id);
+    if (!fs.existsSync(fullDir)) {
+      stopPythonBot(b.id);
+      hostedPythonBots.splice(i, 1);
     }
-
-    // Auto-discover user Python files in downloads directory
-    const scanDownloadsForPython = (dir: string) => {
-      if (!fs.existsSync(dir)) return;
-      const entries = fs.readdirSync(dir);
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry);
-        let stat;
-        try { stat = fs.statSync(fullPath); } catch (_) { continue; }
-        if (stat.isDirectory()) {
-          if (entry !== 'node_modules' && entry !== '.git' && entry !== '__pycache__') {
-            scanDownloadsForPython(fullPath);
-          }
-        } else if (stat.isFile() && entry.endsWith('.py') && !SYSTEM_IGNORED_FILES.has(entry)) {
-          const pyBotId = 'pybot_' + entry.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-          if (!hostedPythonBots.some(b => b.id === pyBotId || b.originalFileName === entry)) {
-            try {
-              const code = fs.readFileSync(fullPath, 'utf-8');
-              deployPythonBotFromFile(code, {
-                name: entry,
-                originalFileName: entry,
-                senderUsername: 'cloud_user',
-                sourceType: 'web_upload'
-              });
-            } catch (_) {}
-          }
-        }
-      }
-    };
-    scanDownloadsForPython(downloadsRootDir);
-  } catch (err) {
-    console.warn('[Auto-discover python bots error]', err);
   }
 }
 
@@ -839,7 +762,7 @@ CRITICAL RULES:
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: prompt,
     });
 
@@ -1646,10 +1569,20 @@ export function stopPythonBot(id: string): boolean {
   bot.autoRestartEnabled = false;
   bot.status = 'STOPPED';
 
+  const timer = pendingRestartTimeouts.get(id);
+  if (timer) {
+    clearTimeout(timer);
+    pendingRestartTimeouts.delete(id);
+  }
+
   const child = runningProcesses.get(id);
   if (child) {
     try {
-      child.kill('SIGTERM');
+      if (child.pid) {
+        try { process.kill(child.pid, 'SIGKILL'); } catch (_) {}
+        try { process.kill(-child.pid, 'SIGKILL'); } catch (_) {}
+      }
+      child.kill('SIGKILL');
     } catch (e: any) {
       console.error('Error stopping python bot:', e);
     }
@@ -1666,16 +1599,35 @@ export function stopPythonBot(id: string): boolean {
  */
 export function deletePythonBot(id: string): boolean {
   stopPythonBot(id);
-  const idx = hostedPythonBots.findIndex(b => b.id === id);
-  if (idx === -1) return false;
-
-  const removed = hostedPythonBots.splice(idx, 1)[0];
-  const botDir = path.join(hostedPythonBotsDir, id);
-  if (fs.existsSync(botDir)) {
-    fs.rmSync(botDir, { recursive: true, force: true });
+  const timer = pendingRestartTimeouts.get(id);
+  if (timer) {
+    clearTimeout(timer);
+    pendingRestartTimeouts.delete(id);
   }
 
-  addLog('python_engine', 'WARN', `Permanently deleted hosted bot "${removed.name}" (${id})`);
+  const idx = hostedPythonBots.findIndex(b => b.id === id);
+  let removedName = id;
+  if (idx !== -1) {
+    const removed = hostedPythonBots.splice(idx, 1)[0];
+    removedName = removed.name;
+    
+    // Also remove matching files in downloads and submissions
+    for (let sIdx = liveSubmissions.length - 1; sIdx >= 0; sIdx--) {
+      const s = liveSubmissions[sIdx];
+      if (s.fileName === removed.originalFileName || s.fileName === removed.name || s.id === id) {
+        deleteSubmission(s.id);
+      }
+    }
+  }
+
+  const botDir = path.join(hostedPythonBotsDir, id);
+  if (fs.existsSync(botDir)) {
+    try {
+      fs.rmSync(botDir, { recursive: true, force: true });
+    } catch (_) {}
+  }
+
+  addLog('python_engine', 'WARN', `Permanently deleted hosted bot "${removedName}" (${id})`);
   saveManifests();
   return true;
 }

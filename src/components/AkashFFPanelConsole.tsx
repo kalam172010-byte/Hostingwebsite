@@ -28,12 +28,15 @@ interface FFProduct {
   id: number;
   category: string;
   name: string;
+  panel_name?: string;
   price_inr: number;
   reseller_price: number;
   stock: number;
   apk_link: string;
   validity: string;
   device_limit: string;
+  bantibhaiya_product_pid?: string;
+  bantibhaiya_product_duration?: string;
   is_active: number;
   availableKeysCount?: number;
 }
@@ -87,11 +90,14 @@ export const AkashFFPanelConsole: React.FC = () => {
 
   // Modals & Form states
   const [showAddProductModal, setShowAddProductModal] = useState<boolean>(false);
-  const [newProductName, setNewProductName] = useState('');
+  const [newPanelName, setNewPanelName] = useState('MST PANEL');
+  const [newProductName, setNewProductName] = useState('7 Days Plan');
   const [newProductCategory, setNewProductCategory] = useState('ANDROID NON ROOT PANEL');
   const [newProductPrice, setNewProductPrice] = useState(220);
   const [newProductResellerPrice, setNewProductResellerPrice] = useState(180);
   const [newProductValidity, setNewProductValidity] = useState('7 Days');
+  const [newProductPid, setNewProductPid] = useState('');
+  const [newProductDuration, setNewProductDuration] = useState('7d');
 
   const [showGenerateKeyModal, setShowGenerateKeyModal] = useState<boolean>(false);
   const [keyGenCount, setKeyGenCount] = useState<number>(5);
@@ -161,18 +167,20 @@ export const AkashFFPanelConsole: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           category: newProductCategory,
-          name: newProductName,
+          panel_name: newPanelName.trim() || newProductName.trim(),
+          name: newProductName.trim(),
           price_inr: newProductPrice,
           reseller_price: newProductResellerPrice,
-          validity: newProductValidity,
-          device_limit: '1 Device',
-          apk_link: 'https://t.me/Akash_12121'
+          validity: newProductValidity || '7 Days',
+          bantibhaiya_product_pid: newProductPid.trim(),
+          bantibhaiya_product_duration: newProductDuration.trim(),
+          device_limit: '1 Device HWID',
+          apk_link: ''
         })
       });
 
       if (res.ok) {
         setShowAddProductModal(false);
-        setNewProductName('');
         fetchData();
       }
     } catch (e) {
@@ -338,10 +346,10 @@ export const AkashFFPanelConsole: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-black tracking-wider bg-gradient-to-r from-rose-400 via-amber-300 to-red-500 bg-clip-text text-transparent">
-                  AKASH FF PANEL
+                  LOCAL SERVER & PANEL MANAGER
                 </h1>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                  MASTER CONSOLE
+                  🖥 LOCALHOST:3000
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -531,8 +539,21 @@ export const AkashFFPanelConsole: React.FC = () => {
                     </div>
 
                     <h3 className="text-base font-bold text-white group-hover:text-rose-300 transition-colors">
-                      {p.name}
+                      {p.panel_name ? `${p.panel_name} - ${p.name}` : p.name}
                     </h3>
+
+                    <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+                      {p.bantibhaiya_product_pid && (
+                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
+                          PID: {p.bantibhaiya_product_pid}
+                        </span>
+                      )}
+                      {p.bantibhaiya_product_duration && (
+                        <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
+                          API Dur: {p.bantibhaiya_product_duration}
+                        </span>
+                      )}
+                    </div>
 
                     <div className="grid grid-cols-2 gap-2 text-xs py-2 border-y border-white/5">
                       <div>
@@ -978,7 +999,7 @@ export const AkashFFPanelConsole: React.FC = () => {
                 <select
                   value={newProductCategory}
                   onChange={e => setNewProductCategory(e.target.value)}
-                  className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500"
+                  className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500 font-medium"
                 >
                   <option value="ANDROID NON ROOT PANEL">ANDROID NON ROOT PANEL</option>
                   <option value="ANDROID ROOT PANEL">ANDROID ROOT PANEL</option>
@@ -987,15 +1008,53 @@ export const AkashFFPanelConsole: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Product Package Name</label>
+                <label className="text-slate-400 block mb-1">Panel Name (ஒரே ப்ராடக்ட் பெயர்)</label>
                 <input
                   type="text"
-                  placeholder="e.g. Android Non-Root VIP - 7 Days"
-                  value={newProductName}
-                  onChange={e => setNewProductName(e.target.value)}
-                  className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500"
+                  placeholder="e.g. MST PANEL or VIP CHEATS"
+                  value={newPanelName}
+                  onChange={e => setNewPanelName(e.target.value)}
+                  className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500 font-mono"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="text-slate-400 block mb-1">Bantibhaiya Reseller PID (பண்டி பையா PID)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 105 (Enter Product PID manually)"
+                  value={newProductPid}
+                  onChange={e => setNewProductPid(e.target.value)}
+                  className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500 font-mono"
+                  required
+                />
+                <p className="text-[10px] text-amber-400 mt-1">💡 All plans under this panel share the same PID (e.g. 105).</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block mb-1">Plan Display Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 7 Days"
+                    value={newProductName}
+                    onChange={e => setNewProductName(e.target.value)}
+                    className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 block mb-1">API Duration (டுரேஷன்)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 7d or 7 Days"
+                    value={newProductDuration}
+                    onChange={e => setNewProductDuration(e.target.value)}
+                    className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500 font-mono"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1005,7 +1064,7 @@ export const AkashFFPanelConsole: React.FC = () => {
                     type="number"
                     value={newProductPrice}
                     onChange={e => setNewProductPrice(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500"
+                    className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500 font-mono"
                     required
                   />
                 </div>
@@ -1015,21 +1074,10 @@ export const AkashFFPanelConsole: React.FC = () => {
                     type="number"
                     value={newProductResellerPrice}
                     onChange={e => setNewProductResellerPrice(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500"
+                    className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500 font-mono"
                     required
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="text-slate-400 block mb-1">Validity</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 7 Days or 30 Days"
-                  value={newProductValidity}
-                  onChange={e => setNewProductValidity(e.target.value)}
-                  className="w-full bg-slate-950 border border-white/10 p-2.5 rounded-xl text-white focus:outline-none focus:border-rose-500"
-                />
               </div>
 
               <div className="flex items-center gap-2 pt-3">
@@ -1044,7 +1092,7 @@ export const AkashFFPanelConsole: React.FC = () => {
                   type="submit"
                   className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold"
                 >
-                  Save Product
+                  Save Product & Plan
                 </button>
               </div>
             </form>

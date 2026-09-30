@@ -41,8 +41,15 @@ export default function App() {
   const [hostedPythonBots, setHostedPythonBots] = useState<HostedPythonBot[]>([]);
 
   // Default active tab: 'python_bots' for Python Telegram Bot Hosting
-  type NavOption = 'python_bots' | 'received_files' | 'hosted_sites' | 'dashboard' | 'code' | 'simulator' | 'rules' | 'guide' | 'ff_panel';
-  const [activeNav, setActiveNavState] = useState<NavOption>('python_bots');
+  type NavOption = 'python_bots' | 'received_files' | 'hosted_sites' | 'dashboard' | 'code' | 'simulator' | 'rules' | 'guide';
+  const [activeNav, setActiveNavState] = useState<NavOption>(() => {
+    if (typeof window !== 'undefined' && window.location.hash) {
+      const hash = window.location.hash.replace('#', '') as NavOption;
+      const valid: NavOption[] = ['python_bots', 'received_files', 'hosted_sites', 'dashboard', 'code', 'simulator', 'rules', 'guide'];
+      if (valid.includes(hash)) return hash;
+    }
+    return 'python_bots';
+  });
   const [navHistory, setNavHistory] = useState<NavOption[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>(INITIAL_BOTS[0]?.id || '');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -83,7 +90,8 @@ export default function App() {
         setActiveNavState(e.state.nav);
       } else {
         const hash = window.location.hash.replace('#', '') as any;
-        if (hash && ['python_bots', 'hosted_sites', 'dashboard', 'code', 'simulator', 'rules', 'guide'].includes(hash)) {
+        const valid: NavOption[] = ['python_bots', 'received_files', 'hosted_sites', 'dashboard', 'code', 'simulator', 'rules', 'guide'];
+        if (hash && valid.includes(hash)) {
           setActiveNavState(hash);
         }
       }
@@ -973,7 +981,6 @@ export default function App() {
               </button>
               <ChevronLeft className="w-3.5 h-3.5 rotate-180 text-slate-600" />
               <span className="text-cyan-300 font-bold flex items-center gap-1.5 bg-cyan-950/60 px-2.5 py-1 rounded-lg border border-cyan-500/30">
-                {activeNav === 'ff_panel' && <><span>🎮</span> Akash FF Panel Console</>}
                 {activeNav === 'python_bots' && <><span>🐍</span> Python Telegram Bots</>}
                 {activeNav === 'hosted_sites' && <><span>🌐</span> Web Site Hosting</>}
                 {activeNav === 'dashboard' && <><span>🤖</span> Master Bots Dashboard</>}

@@ -1,54 +1,24 @@
 [
   {
-    "id": "pybot_llcwf_munyy03v",
-    "name": "FREE_FIRE_SELLING_BOT_UPDATED.py",
-    "entryFile": "FREE_FIRE_SELLING_BOT_UPDATED.py",
-    "sourceType": "telegram_bot",
-    "senderUsername": "Akash_12121",
-    "senderId": 8808556338,
-    "originalFileName": "FREE_FIRE_SELLING_BOT_UPDATED.py",
-    "fileSizeMB": 0.191,
-    "status": "RUNNING",
-    "startedAt": "10:36:12 AM",
-    "uptimeSeconds": 0,
-    "envVars": {
-      "FAMPAY_API_KEY": "fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e",
-      "PAYMENT_GATEWAY_TOKEN": "fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e"
-    },
-    "logs": [
-      "[SYSTEM] Bot worker started successfully.",
-      "[SYSTEM] Entry file: FREE_FIRE_SELLING_BOT_UPDATED.py",
-      "[SYSTEM] All dependencies verified (aiogram, qrcode, pillow)."
-    ],
-    "description": "Telegram Python bot: FREE_FIRE_SELLING_BOT_UPDATED.py",
-    "botId": "bot_primary",
-    "pid": 607,
-    "exitCode": 1,
-    "consecutiveCrashCount": 10,
-    "_autoHealAttempts": 6,
-    "lastErrorNotifiedAt": 1790764496522,
-    "restartCount": 23,
-    "autoRestartEnabled": false
-  },
-  {
-    "id": "pybot_ff_selling",
+    "id": "pybot_ff_selling_bot",
     "name": "FREE_FIRE_SELLING_BOT_UPDATED.py",
     "entryFile": "FREE_FIRE_SELLING_BOT_UPDATED.py",
     "sourceType": "web_upload",
+    "senderUsername": "Akash_12121",
     "originalFileName": "FREE_FIRE_SELLING_BOT_UPDATED.py",
-    "fileSizeMB": 0.191,
+    "fileSizeMB": 0.198,
     "status": "RUNNING",
-    "startedAt": "11:01:11 AM",
+    "startedAt": "Live Active",
     "uptimeSeconds": 0,
     "envVars": {
+      "BOT_TOKEN": "8632912098:AAENMDr-tkYBDsgl5MkA8SAt_3qOgnpL8j8",
       "FAMPAY_API_KEY": "fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e",
       "PAYMENT_GATEWAY_TOKEN": "fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e"
     },
     "logs": [
-      "[SYSTEM] Bot worker started successfully.",
-      "[SYSTEM] Entry file: FREE_FIRE_SELLING_BOT_UPDATED.py",
-      "[SYSTEM] All dependencies verified (aiogram, qrcode, pillow)."
+      "[SYSTEM] 🚀 Launching updated FREE_FIRE_SELLING_BOT_UPDATED.py worker...",
+      "[SYSTEM] Integrated single-step PID, Panel Name, Plan Days, Price & Auto-Delivery."
     ],
-    "pid": 1665
+    "description": "Akash Free Fire Panel VIP Selling & Auto-Delivery Telegram Bot"
   }
 ]
