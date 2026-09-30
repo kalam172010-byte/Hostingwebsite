@@ -39,7 +39,7 @@ export default function App() {
   const [hostedPythonBots, setHostedPythonBots] = useState<HostedPythonBot[]>([]);
 
   // Default active tab: 'python_bots' for Python Telegram Bot Hosting
-  type NavOption = 'python_bots' | 'hosted_sites' | 'dashboard' | 'code' | 'simulator' | 'rules' | 'guide';
+  type NavOption = 'python_bots' | 'hosted_sites' | 'dashboard' | 'code' | 'simulator' | 'rules' | 'guide' | 'ff_panel';
   const [activeNav, setActiveNavState] = useState<NavOption>('python_bots');
   const [navHistory, setNavHistory] = useState<NavOption[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>(INITIAL_BOTS[0]?.id || '');

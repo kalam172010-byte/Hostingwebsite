@@ -5,6 +5,7 @@ import fs from 'fs';
 import { spawn, spawnSync, execSync } from 'child_process';
 import { GoogleGenAI } from '@google/genai';
 import { HostedPythonBot, HostedProject } from '../types';
+export type { HostedPythonBot, HostedProject };
 
 const ai = new GoogleGenAI();
 const require = createRequire(import.meta.url);
@@ -1113,7 +1114,7 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
       addLog(botInfo.botId || 'python_engine', 'ERROR', `Failed running python bot "${botInfo.name}": ${err.message}`);
       notifyUserOfBotError(botInfo, err.message);
 
-      if (botInfo.autoRestartEnabled !== false && botInfo.status !== 'STOPPED') {
+      if (botInfo.autoRestartEnabled !== false) {
         const restartTimer = setTimeout(() => {
           pendingRestartTimeouts.delete(botInfo.id);
           if (botInfo.autoRestartEnabled !== false && !runningProcesses.has(botInfo.id)) {

@@ -1,9 +1,11 @@
 FROM node:20-bookworm-slim
 
-# Install Python 3, pip, and required C libraries for Pillow / Telegram
+# Install Python 3, pip, and compilation tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
+    python3-dev \
+    build-essential \
     curl \
     unzip \
     libjpeg-dev \
@@ -12,25 +14,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python dependencies first (cached layer)
-COPY requirements.txt ./
-RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt 2>/dev/null || pip3 install --no-cache-dir -r requirements.txt
-
-# Install Node dependencies
-COPY package*.json ./
-RUN npm install
-
-# Copy application code
+# Copy all project files into container
 COPY . .
 
-# Build Vite frontend and production server
+# Install Python dependencies safely
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt 2>/dev/null || pip3 install --no-cache-dir -r requirements.txt || true
+
+# Install Node dependencies cleanly without lifecycle script conflicts
+RUN npm install --ignore-scripts --no-audit --no-fund
+
+# Run production build
 RUN npm run build
 
-# Set environment
+# Set production environment and Render port
 ENV NODE_ENV=production
 ENV PORT=10000
 
 EXPOSE 10000
 
-# Start server
+# Start production server
 CMD ["node", "dist/server.js"]

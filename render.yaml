@@ -3,8 +3,8 @@ services:
     name: telehost-telethon-studio
     runtime: node
     plan: free
-    buildCommand: npm install
-    startCommand: npx tsx server.ts
+    buildCommand: npm install && npm run build
+    startCommand: npm start
     envVars:
       - key: NODE_VERSION
         value: 20
