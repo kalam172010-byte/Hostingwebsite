@@ -1003,9 +1003,16 @@ async function startServer() {
       }
     });
   } else {
-    const distPath = fs.existsSync(path.resolve(__dirname, 'dist'))
-      ? path.resolve(__dirname, 'dist')
-      : __dirname;
+    let distPath = path.resolve(process.cwd(), 'dist');
+    if (!fs.existsSync(distPath) || !fs.existsSync(path.join(distPath, 'index.html'))) {
+      if (fs.existsSync(path.join(__dirname, 'index.html'))) {
+        distPath = __dirname;
+      } else if (fs.existsSync(path.resolve(__dirname, 'dist', 'index.html'))) {
+        distPath = path.resolve(__dirname, 'dist');
+      } else {
+        distPath = process.cwd();
+      }
+    }
 
     app.use(express.static(distPath));
     app.get('*', (req, res, next) => {
@@ -1016,7 +1023,12 @@ async function startServer() {
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
       } else {
-        res.status(404).send('Not Found');
+        const rootIndexPath = path.resolve(process.cwd(), 'index.html');
+        if (fs.existsSync(rootIndexPath)) {
+          res.sendFile(rootIndexPath);
+        } else {
+          res.status(404).send('Not Found');
+        }
       }
     });
   }
