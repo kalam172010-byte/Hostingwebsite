@@ -164,8 +164,9 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 
-def fmt_curr(amount: float) -> str:
-    return f"₹{amount:,.2f}"
+def fmt_curr(amount: Any) -> str:
+    val = safe_float(amount, 0.0)
+    return f"₹{val:,.2f}"
 
 def safe_float(val, default=0.0):
     """Safely convert a value to float, return default if fails."""
@@ -175,6 +176,28 @@ def safe_float(val, default=0.0):
         return float(val)
     except (ValueError, TypeError):
         return default
+
+def format_timestamp(ts: Any) -> str:
+    """Safely format timestamp (epoch seconds/milliseconds or date string) into clean readable date."""
+    if not ts:
+        return "N/A"
+    try:
+        if isinstance(ts, (int, float)):
+            val = float(ts)
+            if val > 1e11:
+                val /= 1000
+            return datetime.fromtimestamp(val).strftime("%d-%m-%Y %H:%M")
+        if isinstance(ts, str):
+            clean_ts = ts.strip()
+            if clean_ts.isdigit():
+                val = float(clean_ts)
+                if val > 1e11:
+                    val /= 1000
+                return datetime.fromtimestamp(val).strftime("%d-%m-%Y %H:%M")
+            return clean_ts
+    except Exception:
+        pass
+    return str(ts)
 
 # ==============================================================================
 # 2. DATABASE FUNCTIONS
@@ -749,6 +772,17 @@ def main_menu_kb(user_id: Optional[int] = None) -> InlineKeyboardMarkup:
     ])
     kb.inline_keyboard.append([
         InlineKeyboardButton(
+            text="All History", callback_data="menu_orders",
+            icon_custom_emoji_id=get_emoji_icon("history"),
+            style="primary"
+        ),
+        InlineKeyboardButton(
+            text="🎁 Refer & Earn", callback_data="menu_referral",
+            style="success"
+        )
+    ])
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(
             text="Tutorials", callback_data="menu_how_to",
             icon_custom_emoji_id=get_emoji_icon("tutorial"),
             style="success"
@@ -757,12 +791,6 @@ def main_menu_kb(user_id: Optional[int] = None) -> InlineKeyboardMarkup:
             text="Support", callback_data="menu_support",
             icon_custom_emoji_id=get_emoji_icon("support"),
             style="danger"
-        )
-    ])
-    kb.inline_keyboard.append([
-        InlineKeyboardButton(
-            text="🎁 Refer & Earn", callback_data="menu_referral",
-            style="success"
         )
     ])
     
@@ -2204,54 +2232,214 @@ async def execute_reseller_upgrade(call: CallbackQuery):
 
 @dp.callback_query(F.data == "menu_orders")
 async def my_orders(call: CallbackQuery):
-    orders = db_query("SELECT product_name, delivered_key, purchase_date, price_paid FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 10", (call.from_user.id,), fetchall=True)
-    if not orders: return await call.message.edit_text("🧾 You haven't made any purchases yet. Your vault is empty.", reply_markup=back_kb(), parse_mode='HTML')
-    text = "🧾 <b><u>— YOUR RECENT ORDERS (LAST 10) —</u></b> 🧾\n\n"
-    for o in orders: text += f"📦 <b>{o[0]}</b> ({fmt_curr(o[3])})\n🔑 <code>{o[1]}</code>\n📅 <i>{o[2]}</i>\n━━━━━━━━━━━━━━━━\n"
-    await call.message.edit_text(text, reply_markup=back_kb(), parse_mode='HTML')
+    user_id = call.from_user.id
+    orders = db_query(
+        "SELECT product_name, delivered_key, purchase_date, price_paid FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 25",
+        (user_id,), fetchall=True
+    )
+    if not orders:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🛒 Go to Store", callback_data="menu_shop", style="success")],
+            [InlineKeyboardButton(text="👤 My Profile", callback_data="menu_profile", style="primary")],
+            [InlineKeyboardButton(text="BACK", callback_data="back_main", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+        ])
+        return await call.message.edit_text(
+            "🔑 <b><u>— YOUR KEY PURCHASE HISTORY —</u></b> 🔑\n\n"
+            "📭 <i>Your key vault is currently empty!</i>\n\n"
+            "Purchase any panel from the Product Store and your delivered keys will appear here 24/7.",
+            reply_markup=kb, parse_mode='HTML'
+        )
+
+    text = "🔑 <b><u>— YOUR KEY PURCHASE VAULT —</u></b> 🔑\n\n"
+    text += f"📦 Total Purchased Keys: <b>{len(orders)}</b>\n<i>(Tap any key code below to copy instantly)</i>\n━━━━━━━━━━━━━━━━━━\n"
+    for o in orders:
+        p_name, key_text, p_date, p_price = o
+        p_date_str = format_timestamp(p_date)
+        text += (
+            f"📁 <b>{html.escape(str(p_name))}</b>\n"
+            f"🔑 <code>{html.escape(str(key_text))}</code>\n"
+            f"💵 <b>Price:</b> {fmt_curr(p_price)} | 📅 <i>{p_date_str}</i>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+        )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📊 All Transactions", callback_data="menu_transactions", style="primary"),
+            InlineKeyboardButton(text="👤 My Profile", callback_data="menu_profile", style="primary")
+        ],
+        [
+            InlineKeyboardButton(text="🛒 Buy More Keys", callback_data="menu_shop", style="success")
+        ],
+        [InlineKeyboardButton(text="BACK", callback_data="back_main", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+    ])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data == "menu_transactions")
+async def user_transactions(call: CallbackQuery):
+    user_id = call.from_user.id
+    txns = db_query(
+        "SELECT order_id, amount_inr, status, timestamp, upi_id FROM transactions WHERE user_id=? ORDER BY timestamp DESC LIMIT 20",
+        (user_id,), fetchall=True
+    ) or []
+    crypto = db_query(
+        "SELECT txid, amount_usdt, timestamp FROM crypto_txns WHERE user_id=? ORDER BY timestamp DESC LIMIT 5",
+        (user_id,), fetchall=True
+    ) or []
+
+    if not txns and not crypto:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Add Balance Now", callback_data="menu_add_balance", style="success")],
+            [InlineKeyboardButton(text="👤 My Profile", callback_data="menu_profile", style="primary")],
+            [InlineKeyboardButton(text="BACK", callback_data="back_main", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+        ])
+        return await call.message.edit_text(
+            "💳 <b><u>— YOUR TRANSACTION HISTORY —</u></b> 💳\n\n"
+            "📭 <i>No deposit transactions found.</i>\n\n"
+            "Use the 'Add Balance' option to top up your wallet via UPI or Crypto.",
+            reply_markup=kb, parse_mode='HTML'
+        )
+
+    text = "💳 <b><u>— YOUR TRANSACTION HISTORY —</u></b> 💳\n\n"
+    text += f"📊 Total Records: <b>{len(txns) + len(crypto)}</b>\n━━━━━━━━━━━━━━━━━━\n"
+
+    for t in txns:
+        oid, amt, st, ts, upi = t
+        st_clean = str(st).lower()
+        if st_clean in ("paid", "success", "completed"):
+            badge = "🟢 <b>PAID / SUCCESS</b>"
+        elif st_clean in ("pending", "waiting"):
+            badge = "🟡 <b>PENDING</b>"
+        elif st_clean in ("expired", "cancelled", "failed"):
+            badge = "🔴 <b>EXPIRED</b>"
+        else:
+            badge = f"⚪ <b>{str(st).upper()}</b>"
+
+        date_str = format_timestamp(ts)
+        text += (
+            f"{badge} | <b>Order:</b> <code>{html.escape(str(oid))}</code>\n"
+            f"💰 <b>Amount:</b> <b>{fmt_curr(amt)}</b>\n"
+            f"📅 <b>Date:</b> <i>{date_str}</i>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+        )
+
+    for c in crypto:
+        txid, usdt, ts = c
+        date_str = format_timestamp(ts)
+        text += (
+            f"🪙 <b>CRYPTO (USDT)</b> | 🟢 <b>VERIFIED</b>\n"
+            f"💰 <b>Amount:</b> <b>${safe_float(usdt):.2f} USDT</b>\n"
+            f"🆔 <b>TXID:</b> <code>{html.escape(str(txid)[:18])}...</code>\n"
+            f"📅 <b>Date:</b> <i>{date_str}</i>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+        )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔑 Key Vault", callback_data="menu_orders", style="primary"),
+            InlineKeyboardButton(text="👤 My Profile", callback_data="menu_profile", style="primary")
+        ],
+        [
+            InlineKeyboardButton(text="💳 Add Balance", callback_data="menu_add_balance", style="success")
+        ],
+        [InlineKeyboardButton(text="BACK", callback_data="back_main", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
+    ])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
 
 @dp.callback_query(F.data == "menu_profile")
 async def show_profile(call: CallbackQuery):
-    u = db_query("SELECT user_id, first_name, username, account_type, balance, orders_count, spent, joined_date, is_reseller, reseller_since, total_saved, is_vip FROM users WHERE user_id=?", (call.from_user.id,), fetchone=True)
+    user_id = call.from_user.id
+    u = db_query("SELECT user_id, first_name, username, balance, account_type, orders_count, spent, joined_date, is_reseller, reseller_since, total_saved, is_vip FROM users WHERE user_id=?", (user_id,), fetchone=True)
+    if not u:
+        db_query(
+            "INSERT OR IGNORE INTO users (user_id, first_name, username, joined_date) VALUES (?, ?, ?, ?)",
+            (user_id, call.from_user.first_name or "User", call.from_user.username or "", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        u = db_query("SELECT user_id, first_name, username, balance, account_type, orders_count, spent, joined_date, is_reseller, reseller_since, total_saved, is_vip FROM users WHERE user_id=?", (user_id,), fetchone=True)
+
+    uid, first_name, uname, balance, acc_type, orders_count, spent, joined_date, is_reseller, reseller_since, total_saved, is_vip = u
+    
+    balance = safe_float(balance, 0.0)
+    spent = safe_float(spent, 0.0)
+    total_saved = safe_float(total_saved, 0.0)
+    orders_count = int(orders_count or 0)
+
     acc_type_display = []
-    if u[8]: acc_type_display.append(f"{get_emoji('reseller')} Reseller")
-    if u[11]: acc_type_display.append(f"{get_emoji('vip')} VIP")
+    if is_reseller: acc_type_display.append(f"{get_emoji('reseller')} Reseller")
+    if is_vip: acc_type_display.append(f"{get_emoji('vip')} VIP")
     type_str = " | ".join(acc_type_display) if acc_type_display else f"{get_emoji('regular_user')} Regular User"
+    
+    display_name = html.escape(str(first_name or "User"))
+    display_uname = f"@{html.escape(str(uname))}" if uname else "Not set"
+
     text = (
         f"{get_emoji('grid_id')} <b><u>— YOUR SECURE PROFILE —</u></b> {get_emoji('grid_id')}\n\n"
-        f"{get_emoji('grid_id')} <b>Grid ID:</b> <code>{u[0]}</code>\n"
-        f"{get_emoji('name')} <b>Name:</b> {html.escape(str(u[1] or 'User'))}\n"
-        f"🔗 <b>Username:</b> {('@' + html.escape(str(u[2]))) if u[2] else 'Not set'}\n"
+        f"{get_emoji('grid_id')} <b>User ID:</b> <code>{uid}</code>\n"
+        f"{get_emoji('name')} <b>Name:</b> <b>{display_name}</b>\n"
+        f"🔗 <b>Username:</b> {display_uname}\n"
         f"{get_emoji('account_level')} <b>Account Level:</b> {type_str}\n\n"
-        f"{get_emoji('wallet_left')} <b>— Wallet —</b> {get_emoji('wallet_right')}\n"
-        f"{get_emoji('wallet_left')} <b>Current Balance:</b> {fmt_curr(u[3])} {get_emoji('wallet_right')}\n\n"
-        f"{get_emoji('global_stats')} <b>— Global Statistics —</b>\n"
-        f"{get_emoji('total_orders')} <b>Total Orders:</b> {u[5]}\n"
-        f"{get_emoji('total_spent')} <b>Total Spent:</b> {fmt_curr(u[6])}\n"
+        f"{get_emoji('wallet_left')} <b>— Wallet Balance —</b> {get_emoji('wallet_right')}\n"
+        f"💰 <b>Current Balance:</b> <b>{fmt_curr(balance)}</b>\n\n"
+        f"{get_emoji('global_stats')} <b>— Account Statistics —</b>\n"
+        f"📦 <b>Total Keys Purchased:</b> <b>{orders_count} Keys</b>\n"
+        f"💸 <b>Total Money Spent:</b> <b>{fmt_curr(spent)}</b>\n"
     )
-    if u[8]:
-        text += f"{get_emoji('shield_icon')} <b>— RESELLER METRICS —</b> {get_emoji('shield_icon')}\n{get_emoji('money_icon')} <b>Total Saved via Reseller:</b> {fmt_curr(u[10])}\n\n"
-    text += f"{get_emoji('joined_grid')} <b>Joined Grid:</b> {u[7]}\n\n"
+    if is_reseller:
+        text += f"{get_emoji('shield_icon')} <b>— RESELLER METRICS —</b> {get_emoji('shield_icon')}\n💰 <b>Total Saved via Reseller:</b> {fmt_curr(total_saved)}\n\n"
+    text += f"📅 <b>Registered Date:</b> <i>{joined_date or 'N/A'}</i>\n\n"
 
-    # Purchase history is shown directly inside Profile.
+    # 1. Recent Key History in Profile
     orders = db_query(
-        "SELECT delivered_key FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 10",
-        (call.from_user.id,), fetchall=True
+        "SELECT product_name, delivered_key, purchase_date, price_paid FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 3",
+        (user_id,), fetchall=True
     )
-    text += "🧾 <b><u>— PURCHASE HISTORY —</u></b> 🧾\n\n"
+    text += f"🔑 <b><u>— KEY PURCHASE HISTORY (RECENT) —</u></b>\n"
     if orders:
         for o in orders:
-            text += f"🔑 <code>{o[0]}</code>\n"
+            p_name, k_text, p_date, p_price = o
+            text += (
+                f"📦 <b>{html.escape(str(p_name))}</b>\n"
+                f"🔑 <code>{html.escape(str(k_text))}</code>\n"
+                f"💵 <b>{fmt_curr(p_price)}</b> | 📅 <i>{format_timestamp(p_date)}</i>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+            )
     else:
-        text += "📭 <i>No purchases yet.</i>\n"
+        text += "📭 <i>No keys purchased yet.</i>\n━━━━━━━━━━━━━━━━━━\n"
+
+    # 2. Recent Transaction History in Profile
+    txns = db_query(
+        "SELECT order_id, amount_inr, status, timestamp FROM transactions WHERE user_id=? ORDER BY timestamp DESC LIMIT 3",
+        (user_id,), fetchall=True
+    )
+    text += f"\n💳 <b><u>— TRANSACTION HISTORY (DEPOSITS) —</u></b>\n"
+    if txns:
+        for t in txns:
+            oid, amt, st, ts = t
+            st_clean = str(st).lower()
+            if st_clean in ("paid", "success", "completed"):
+                badge = "🟢 PAID"
+            elif st_clean in ("pending", "waiting"):
+                badge = "🟡 PENDING"
+            elif st_clean in ("expired", "cancelled"):
+                badge = "🔴 EXPIRED"
+            else:
+                badge = f"⚪ {str(st).upper()}"
+            text += (
+                f"{badge} | <code>{html.escape(str(oid))}</code>\n"
+                f"💰 <b>{fmt_curr(amt)}</b> | 📅 <i>{format_timestamp(ts)}</i>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+            )
+    else:
+        text += "📭 <i>No deposit transactions yet.</i>\n━━━━━━━━━━━━━━━━━━\n"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="Redeem Promo Code",
-            callback_data="redeem_coupon",
-            icon_custom_emoji_id=get_emoji_icon('redeem_icon'),
-            style="success"
-        )],
+        [
+            InlineKeyboardButton(text="🔑 View All Keys", callback_data="menu_orders", icon_custom_emoji_id=get_emoji_icon('history'), style="primary"),
+            InlineKeyboardButton(text="📊 All Transactions", callback_data="menu_transactions", style="primary")
+        ],
+        [
+            InlineKeyboardButton(text="💳 Add Balance", callback_data="menu_add_balance", icon_custom_emoji_id=get_emoji_icon('add_balance'), style="success"),
+            InlineKeyboardButton(text="🎟 Redeem Code", callback_data="redeem_coupon", icon_custom_emoji_id=get_emoji_icon('redeem_icon'), style="primary")
+        ],
         [InlineKeyboardButton(text="BACK", callback_data="back_main", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")]
     ])
     await call.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
