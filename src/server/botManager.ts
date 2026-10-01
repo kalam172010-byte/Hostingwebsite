@@ -367,24 +367,42 @@ export function loadManifests() {
       }
     });
 
-    // Auto-resume Master Bots if configured
+    // Auto-resume Master Bots if configured (ensuring no token collision with active Python bots)
     if (fs.existsSync(masterBotsManifestPath)) {
       try {
         const savedMasters = JSON.parse(fs.readFileSync(masterBotsManifestPath, 'utf-8'));
         if (Array.isArray(savedMasters)) {
           savedMasters.forEach(b => {
             if (b.token && b.status === 'RUNNING') {
-              console.log(`[Boot] Auto-resuming Master Telegram Bot @${b.botUsername || b.name}...`);
-              startRealBot({
-                id: b.id,
-                name: b.name,
-                token: b.token,
-                adminChatId: b.adminChatId,
-                downloadPath: b.downloadPath,
-                rules: b.rules
-              }).catch(e => {
-                console.warn('[Auto-resume Master Bot Warning]', e.message);
+              const cleanToken = sanitizeTelegramToken(b.token);
+              // Check if an active Hosted Python Bot is already using this token
+              const isUsedByPythonBot = hostedPythonBots.some(pyBot => {
+                if (pyBot.status !== 'RUNNING') return false;
+                if (pyBot.envVars?.BOT_TOKEN === cleanToken) return true;
+                const pyScriptPath = path.join(hostedPythonBotsDir, pyBot.id, pyBot.entryFile);
+                if (fs.existsSync(pyScriptPath)) {
+                  const code = fs.readFileSync(pyScriptPath, 'utf-8');
+                  return code.includes(cleanToken);
+                }
+                return false;
               });
+
+              if (isUsedByPythonBot) {
+                console.log(`[Token Dedication] Master Bot @${b.botUsername || b.name} is paused because token is exclusively running user Python bot.`);
+                b.status = 'STANDBY';
+              } else {
+                console.log(`[Boot] Auto-resuming Master Telegram Bot @${b.botUsername || b.name}...`);
+                startRealBot({
+                  id: b.id,
+                  name: b.name,
+                  token: b.token,
+                  adminChatId: b.adminChatId,
+                  downloadPath: b.downloadPath,
+                  rules: b.rules
+                }).catch(e => {
+                  console.warn('[Auto-resume Master Bot Warning]', e.message);
+                });
+              }
             }
           });
         }

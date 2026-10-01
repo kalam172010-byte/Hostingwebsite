@@ -180,9 +180,11 @@ def safe_float(val, default=0.0):
 # 2. DATABASE FUNCTIONS
 # ==============================================================================
 def db_query(query: str, params: tuple = (), fetchone: bool = False, fetchall: bool = False, commit: bool = True) -> Any:
-    conn = sqlite3.connect('Cuibcc.db')
+    conn = sqlite3.connect('Cuibcc.db', timeout=30.0)
     c = conn.cursor()
     try:
+        c.execute("PRAGMA journal_mode=WAL;")
+        c.execute("PRAGMA busy_timeout=5000;")
         c.execute(query, params)
         if fetchone:
             res = c.fetchone()
@@ -305,8 +307,10 @@ def get_ui_text(key: str, **kwargs) -> str:
 # 4. DATABASE INITIALISATION & MIGRATION
 # ==============================================================================
 def init_db() -> None:
-    conn = sqlite3.connect('Cuibcc.db')
+    conn = sqlite3.connect('Cuibcc.db', timeout=30.0)
     c = conn.cursor()
+    c.execute("PRAGMA journal_mode=WAL;")
+    c.execute("PRAGMA busy_timeout=5000;")
     
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -1195,79 +1199,83 @@ async def run_payment_verification(user_id: int, order_id: str, reply_target: An
 async def auto_verify_task() -> None:
     """Auto-verify FamGateway pending transactions every 3 seconds for up to 5 minutes."""
     while True:
-        await asyncio.sleep(3)
+        try:
+            await asyncio.sleep(3)
 
-        gateway_token = (get_setting("payment_gateway_token", "") or "").strip()
-        if not gateway_token:
-            # Legacy FamPay fallback is handled only when its API key is configured.
-            gateway_token = (get_setting("fampay_api_key", "") or "").strip()
-            if not gateway_token or gateway_token == "YOUR_FAMPAY_API_KEY":
-                continue
+            gateway_token = (get_setting("payment_gateway_token", "") or "").strip()
+            if not gateway_token:
+                gateway_token = (get_setting("fampay_api_key", "") or "").strip()
+                if not gateway_token or gateway_token == "YOUR_FAMPAY_API_KEY":
+                    continue
 
-        pending_txns = db_query(
-            "SELECT order_id, user_id, amount_inr, timestamp, expires_at FROM transactions WHERE status='pending'",
-            fetchall=True
-        ) or []
+            pending_txns = db_query(
+                "SELECT order_id, user_id, amount_inr, timestamp, expires_at FROM transactions WHERE status='pending'",
+                fetchall=True
+            ) or []
 
-        for txn in pending_txns:
-            order_id, user_id, amount, ts, expires_at = txn
+            for txn in pending_txns:
+                order_id, user_id, amount, ts, expires_at = txn
 
-            if expires_at and time.time() > expires_at:
-                db_query("UPDATE transactions SET status='expired' WHERE order_id=? AND status='pending'", (order_id,))
+                if expires_at and time.time() > expires_at:
+                    db_query("UPDATE transactions SET status='expired' WHERE order_id=? AND status='pending'", (order_id,))
+                    try:
+                        await bot.send_message(
+                            user_id,
+                            f"⏳ <b>QR Code Expired!</b>\nOrder <code>{html.escape(str(order_id))}</code> expired. Please create a new payment.",
+                            parse_mode='HTML'
+                        )
+                    except Exception:
+                        pass
+                    continue
+
+                result = await verify_fampay_payment(order_id)
+                gateway_status = str(result.get("status", "")).lower() if isinstance(result, dict) else ""
+                if gateway_status in {"expired", "not_found"}:
+                    db_query("UPDATE transactions SET status='expired' WHERE order_id=? AND status='pending'", (order_id,))
+                    continue
+                if gateway_status != "success":
+                    continue
+
+                data = result.get("data") if isinstance(result.get("data"), dict) else result
+                amount_received = data.get("amount", amount)
+                try:
+                    amount_received = float(amount_received)
+                except Exception:
+                    amount_received = float(amount)
+                utr = data.get("utr") or "N/A"
+                sender_name = data.get("sender_name") or "N/A"
+                transaction_id = data.get("transaction_id") or order_id
+
+                if not credit_verified_payment_once(user_id, order_id, amount_received):
+                    continue
+
                 try:
                     await bot.send_message(
                         user_id,
-                        f"⏳ <b>QR Code Expired!</b>\nOrder <code>{html.escape(str(order_id))}</code> expired. Please create a new payment.",
+                        f"✨ <b>AUTO PAYMENT VERIFIED!</b>\n\n"
+                        f"✅ <b>Amount:</b> {fmt_curr(amount_received)}\n"
+                        f"💰 <b>Wallet Balance Updated</b>\n"
+                        f"🧾 <b>UTR:</b> <code>{html.escape(str(utr))}</code>\n"
+                        f"👤 <b>Sender:</b> {html.escape(str(sender_name))}",
                         parse_mode='HTML'
                     )
                 except Exception:
                     pass
-                continue
 
-            result = await verify_fampay_payment(order_id)
-            gateway_status = str(result.get("status", "")).lower() if isinstance(result, dict) else ""
-            if gateway_status in {"expired", "not_found"}:
-                db_query("UPDATE transactions SET status='expired' WHERE order_id=? AND status='pending'", (order_id,))
-                continue
-            if gateway_status != "success":
-                continue
-
-            data = result.get("data") if isinstance(result.get("data"), dict) else result
-            amount_received = data.get("amount", amount)
-            try:
-                amount_received = float(amount_received)
-            except Exception:
-                amount_received = float(amount)
-            utr = data.get("utr") or "N/A"
-            sender_name = data.get("sender_name") or "N/A"
-            transaction_id = data.get("transaction_id") or order_id
-
-            # Atomic update prevents manual Verify + auto Verify from crediting twice.
-            if not credit_verified_payment_once(user_id, order_id, amount_received):
-                continue
-
-            try:
-                await bot.send_message(
+                try:
+                    await send_advanced_notification(user_id, "DEPOSIT", amount_received, product=transaction_id, gateway="FamGateway Auto")
+                except Exception:
+                    pass
+                log_activity(
                     user_id,
-                    f"✨ <b>AUTO PAYMENT VERIFIED!</b>\n\n"
-                    f"✅ <b>Amount:</b> {fmt_curr(amount_received)}\n"
-                    f"💰 <b>Wallet Balance Updated</b>\n"
-                    f"🧾 <b>UTR:</b> <code>{html.escape(str(utr))}</code>\n"
-                    f"👤 <b>Sender:</b> {html.escape(str(sender_name))}",
-                    parse_mode='HTML'
+                    "DEPOSIT_AUTO_SUCCESS",
+                    f"Order: {order_id}, Amount: {amount_received}, UTR: {utr}"
                 )
-            except Exception:
-                pass
-
-            try:
-                await send_advanced_notification(user_id, "DEPOSIT", amount_received, product=transaction_id, gateway="FamGateway Auto")
-            except Exception:
-                pass
-            log_activity(
-                user_id,
-                "DEPOSIT_AUTO_SUCCESS",
-                f"Amount: {amount_received}, Gateway: FamGateway Auto, Order: {order_id}, UTR: {utr}"
-            )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"Auto-verify task notice: {e}")
+            await asyncio.sleep(4)
 
 
 # ==============================================================================
@@ -3762,22 +3770,30 @@ async def main() -> None:
     logger.info("FamGateway Auto-Verifier Daemon Running in Background (3s polling).")
     logger.info("🚀 CORE SYSTEM IS FULLY OPERATIONAL...")
     
+    reconnect_delay = 2
     while True:
         try:
             logger.info("⚡ Connecting to Telegram Bot polling stream...")
             await bot.delete_webhook(drop_pending_updates=False)
-            await dp.start_polling(bot, handle_signals=False, polling_timeout=30)
+            await dp.start_polling(
+                bot,
+                handle_signals=False,
+                polling_timeout=30,
+                allowed_updates=["message", "edited_message", "callback_query", "channel_post", "edited_channel_post", "inline_query", "chosen_inline_result", "my_chat_member", "chat_member"]
+            )
+            reconnect_delay = 2
         except (KeyboardInterrupt, SystemExit):
             logger.info("Shutting down bot gracefully...")
             break
         except Exception as err:
-            logger.error(f"⚠️ Telegram Polling connection interrupted: {err}. Auto-reconnecting in 3 seconds...")
-            await asyncio.sleep(3)
-        finally:
-            try:
-                await bot.session.close()
-            except Exception:
-                pass
+            logger.error(f"⚠️ Telegram Polling connection interrupted: {err}. Auto-reconnecting in {reconnect_delay}s...")
+            await asyncio.sleep(reconnect_delay)
+            reconnect_delay = min(15, reconnect_delay + 2)
+
+    try:
+        await bot.session.close()
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     try:
