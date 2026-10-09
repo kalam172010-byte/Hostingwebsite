@@ -301,6 +301,12 @@ while True:
               </div>
             )}
 
+            {/* Render 24/7 Anti-Sleep Heartbeat Pill */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-xs text-emerald-300 shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Render 24/7 Anti-Sleep: <strong>Active (Every 7m)</strong></span>
+            </div>
+
             <button
               onClick={() => setShowTokenModal(true)}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-md shadow-blue-600/20 transition"
@@ -346,7 +352,7 @@ while True:
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
             <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
               <span className="font-bold text-amber-400">1. Connect Your Bot Token</span>
               <p className="text-slate-300 leading-relaxed">
@@ -365,6 +371,13 @@ while True:
               <span className="font-bold text-emerald-400">3. Send .py or .zip File</span>
               <p className="text-slate-300 leading-relaxed">
                 Send your Python bot script in the chat. The cloud runtime will automatically download and execute it!
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-cyan-800/60 space-y-1.5">
+              <span className="font-bold text-cyan-400">4. Render 24/7 Anti-Sleep</span>
+              <p className="text-slate-300 leading-relaxed">
+                On Render free tier, our built-in 7m heartbeat keeps your web service awake. Deploy using <code>render.yaml</code> Blueprint!
               </p>
             </div>
           </div>

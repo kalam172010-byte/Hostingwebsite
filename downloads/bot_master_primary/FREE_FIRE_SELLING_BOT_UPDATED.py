@@ -3950,7 +3950,53 @@ async def setup_binance_address(m: Message, state: FSMContext):
 # ==============================================================================
 # 25. BOOTSTRAPPING & MAIN
 # ==============================================================================
+def start_render_health_server():
+    """Starts a minimal HTTP health-check server when deployed on Render or Docker (PORT env var set)."""
+    port_str = os.environ.get("PORT")
+    if not port_str:
+        return
+    try:
+        import http.server
+        import socketserver
+        import threading
+        port = int(port_str)
+        class RenderHealthHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok","bot":"FREE_FIRE_SELLING_BOT_UPDATED","running":true,"service":"24/7 Telegram Store Bot"}\n')
+            def log_message(self, format, *args):
+                pass
+        def serve():
+            socketserver.TCPServer.allow_reuse_address = True
+            with socketserver.TCPServer(("0.0.0.0", port), RenderHealthHandler) as httpd:
+                logger.info(f"🌐 [Render Web Mode] 24/7 Health check server listening on 0.0.0.0:{port}")
+                httpd.serve_forever()
+        t = threading.Thread(target=serve, daemon=True)
+        t.start()
+    except Exception as e:
+        logger.warning(f"[Render Web Mode] Notice: Could not bind port {port_str}: {e}")
+
+async def render_keepalive_task():
+    """Anti-Sleep loop: Self-pings Render external public URL every 8 minutes to prevent free-tier spindown."""
+    render_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL") or os.environ.get("PUBLIC_URL")
+    if not render_url:
+        return
+    clean_target = render_url.rstrip('/') + '/health'
+    logger.info(f"⏱️ [Render 24/7 Keep-Alive] Active: Will self-ping {clean_target} every 8 minutes.")
+    while True:
+        await asyncio.sleep(480)
+        try:
+            status, _ = await http_request("GET", clean_target, timeout=15)
+            logger.info(f"💚 [Render 24/7 Keep-Alive] Heartbeat ping succeeded (HTTP {status})")
+        except Exception as e:
+            logger.debug(f"[Render 24/7 Keep-Alive] Ping notice: {e}")
+
 async def main() -> None:
+    start_render_health_server()
+    asyncio.create_task(render_keepalive_task())
     init_db()
     logger.info("Initializing DB structure...")
     migrate_categories()

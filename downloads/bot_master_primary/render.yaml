@@ -1,9 +1,13 @@
 services:
-  - type: worker
+  - type: web
     name: telegram-store-bot
     runtime: python
+    plan: free
+    healthCheckPath: /health
     buildCommand: pip install -r requirements.txt
-    startCommand: python Main_QR_PAYMENT_ALL_FIXED.py
+    startCommand: python FREE_FIRE_SELLING_BOT_UPDATED.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: PYTHONUNBUFFERED
+        value: "1"

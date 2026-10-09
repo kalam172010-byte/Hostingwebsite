@@ -1,1 +1,2 @@
-worker: python Main_QR_PAYMENT_ALL_FIXED.py
+web: python FREE_FIRE_SELLING_BOT_UPDATED.py
+worker: python FREE_FIRE_SELLING_BOT_UPDATED.py

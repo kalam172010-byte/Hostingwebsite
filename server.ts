@@ -51,12 +51,25 @@ process.on('unhandledRejection', (reason: any) => {
 const app = express();
 app.use(express.json({ limit: '25mb' }));
 
-// Middleware to detect base URL dynamically for live preview links
+// Global Keep-Alive State for 24/7 Render Anti-Sleep Heartbeat
+let detectedExternalUrl: string = (process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || process.env.PUBLIC_URL || '').replace(/\/+$/, '');
+let lastExternalKeepAlivePing: { time: string; status: string; url: string } | null = null;
+
+// Middleware to detect base URL dynamically for live preview links & 24/7 Render keep-alive
 app.use((req, _res, next) => {
   const host = req.get('host');
   if (host) {
     const proto = req.get('x-forwarded-proto') || (req.secure ? 'https' : 'http');
-    setServerBaseUrl(`${proto}://${host}`);
+    const fullUrl = `${proto}://${host}`;
+    setServerBaseUrl(fullUrl);
+
+    // If external host (not localhost or loopback), register for 24/7 Render anti-sleep pings
+    if (!host.includes('localhost') && !host.includes('127.0.0.1') && !host.includes('0.0.0.0')) {
+      if (!detectedExternalUrl) {
+        console.log(`[TeleHost 24/7] Discovered external public URL: ${fullUrl}`);
+      }
+      detectedExternalUrl = fullUrl.replace(/\/+$/, '');
+    }
   }
   next();
 });
@@ -987,8 +1000,22 @@ app.post('/api/admin/reset-limits', (_req, res) => {
   res.json({ success: true, message: 'All daily upload limits have been reset.' });
 });
 
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', engine: 'TeleHost Telethon Studio', hostedSitesReady: true });
+// Comprehensive Health Check Endpoints (Supports Render healthCheckPath, Docker, UptimeRobot & 24/7 monitors)
+app.get(['/api/health', '/health', '/healthz', '/ping'], (_req, res) => {
+  res.json({ 
+    status: 'ok', 
+    engine: 'TeleHost Telethon Studio', 
+    hostedSitesReady: true,
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    keepAlive: {
+      status: 'active',
+      renderExternalUrl: process.env.RENDER_EXTERNAL_URL || null,
+      activeTargetUrl: detectedExternalUrl || process.env.RENDER_EXTERNAL_URL || null,
+      lastPing: lastExternalKeepAlivePing,
+      antiSleepIntervalSeconds: 420
+    }
+  });
 });
 
 function getListenPort(): number {
@@ -1079,7 +1106,7 @@ async function startServer() {
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
 
-  // 24/7 Keep-Alive Self-Ping Heartbeat (prevents scale-to-zero, socket drops & idle freezing)
+  // 1. Internal Keep-Alive Self-Ping Heartbeat (prevents scale-to-zero, socket drops & idle freezing)
   setInterval(() => {
     try {
       fetch(`http://127.0.0.1:${PORT}/api/health`)
@@ -1087,6 +1114,47 @@ async function startServer() {
         .catch(() => {});
     } catch (_) {}
   }, 25000);
+
+  // 2. Render 24/7 Anti-Sleep External Keep-Alive Heartbeat (every 7 minutes)
+  // Render Free Web Services automatically spin down after 15 minutes without external inbound traffic.
+  // Pinging the public HTTPS URL (RENDER_EXTERNAL_URL or detected host) through Render's public router
+  // resets Render's 15-minute inactivity counter and keeps the server and all Telegram bots running 24/7!
+  const triggerExternalKeepAlive = async () => {
+    const targetBase = process.env.RENDER_EXTERNAL_URL || detectedExternalUrl || process.env.APP_URL;
+    if (targetBase) {
+      const cleanBase = targetBase.replace(/\/+$/, '');
+      const pingUrl = `${cleanBase}/api/health`;
+      try {
+        const res = await fetch(pingUrl, {
+          headers: { 'User-Agent': 'TeleHost-247-Heartbeat/2.0' },
+          signal: AbortSignal.timeout(15000)
+        });
+        lastExternalKeepAlivePing = {
+          time: new Date().toISOString(),
+          status: `HTTP ${res.status}`,
+          url: pingUrl
+        };
+        console.log(`[Render 24/7 Keep-Alive] External ping to ${pingUrl} succeeded (${res.status})`);
+      } catch (err: any) {
+        lastExternalKeepAlivePing = {
+          time: new Date().toISOString(),
+          status: `Failed: ${err.message}`,
+          url: pingUrl
+        };
+        console.warn(`[Render 24/7 Keep-Alive] External ping notice for ${pingUrl}:`, err.message);
+      }
+    }
+  };
+
+  // Immediate external ping 15s after startup to warm up public routing
+  setTimeout(() => {
+    triggerExternalKeepAlive().catch(() => {});
+  }, 15000);
+
+  // Repeat external ping every 7 minutes (420,000ms), safely before Render's 15-minute sleep threshold
+  setInterval(() => {
+    triggerExternalKeepAlive().catch(() => {});
+  }, 7 * 60 * 1000);
 
   server.on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Server, Terminal, Shield, BookOpen, ExternalLink, Copy, Check, Cpu, CheckCircle2, ArrowLeft } from 'lucide-react';
+import { Server, Terminal, Shield, BookOpen, ExternalLink, Copy, Check, Cpu, CheckCircle2, ArrowLeft, Globe } from 'lucide-react';
 
 interface HostingGuideViewProps {
   onNavigateBack?: () => void;
@@ -186,6 +186,75 @@ docker run -d \\
             <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
             <div>
               <strong>Production Storage Tip:</strong> Always mount a host directory (e.g. <code className="text-white font-mono">-v /var/telethon_downloads:/app/downloads</code>) so downloaded files persist on your server even if the Docker container is restarted or updated!
+            </div>
+          </div>
+        </div>
+
+        {/* Step 4: Render.com 24/7 Cloud Deployment & Anti-Sleep */}
+        <div className="lg:col-span-3 bg-slate-900 border border-cyan-500/30 rounded-xl p-5 space-y-4 shadow-lg shadow-cyan-950/20">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <Globe className="w-4 h-4 text-cyan-400" />
+              <span>4. Render.com 24/7 Cloud Hosting (Free Tier + Anti-Sleep)</span>
+            </div>
+            <span className="px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              24/7 Anti-Sleep Armed
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-slate-300 leading-relaxed">
+            <div className="space-y-2">
+              <h4 className="font-semibold text-slate-100 text-xs flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-md bg-cyan-500/20 text-cyan-400 flex items-center justify-center text-[10px] font-bold">1</span>
+                Deploying via Render Blueprint (Recommended)
+              </h4>
+              <p className="text-[11px] text-slate-400">
+                This repository includes a pre-configured <code className="text-cyan-300 font-mono">render.yaml</code> blueprint. In Render Dashboard, click <strong>New +</strong> → <strong>Blueprint</strong> → select this repository. Render automatically configures all build and start commands with zero manual setup.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="font-semibold text-slate-100 text-xs flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-md bg-cyan-500/20 text-cyan-400 flex items-center justify-center text-[10px] font-bold">2</span>
+                Manual Web Service Settings (If not using Blueprint)
+              </h4>
+              <ul className="text-[11px] text-slate-400 space-y-1 font-mono">
+                <li>• <strong>Type:</strong> Web Service (Free plan)</li>
+                <li>• <strong>Runtime:</strong> Node</li>
+                <li>• <strong>Build Command:</strong> <code className="text-slate-200">npm install && npm run build</code></li>
+                <li>• <strong>Start Command:</strong> <code className="text-slate-200">node dist/server.js</code></li>
+                <li>• <strong>Health Check Path:</strong> <code className="text-emerald-300">/api/health</code></li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 space-y-2">
+            <div className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+              <span>⚡ How Render 24/7 Anti-Sleep Keeps Your Bots Online:</span>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              Render's free tier normally spins down after 15 minutes of inactivity. Our server contains an active <strong>24/7 Anti-Sleep Heartbeat</strong> that pings your public Render URL (<code className="text-cyan-300 font-mono">https://your-service.onrender.com/api/health</code>) every <strong>7 minutes</strong>. This external request resets Render's 15-minute sleep timer so your web dashboard and Telegram bots <strong>never shut down</strong>.
+            </p>
+            <div className="pt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
+              <span>Optional Extra Guarantee:</span>
+              <a 
+                href="https://cron-job.org" 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-cyan-400 hover:text-cyan-300 underline inline-flex items-center gap-0.5"
+              >
+                Cron-job.org (Free ping every 5m) <ExternalLink className="w-2.5 h-2.5" />
+              </a>
+              <span>·</span>
+              <a 
+                href="https://uptimerobot.com" 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-cyan-400 hover:text-cyan-300 underline inline-flex items-center gap-0.5"
+              >
+                UptimeRobot (Free HTTP Monitor) <ExternalLink className="w-2.5 h-2.5" />
+              </a>
             </div>
           </div>
         </div>
