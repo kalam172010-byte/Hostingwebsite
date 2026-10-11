@@ -85,8 +85,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "8808556338"))
 ADMIN_IDS = {8808556338, 5255460348}
 ADMIN_CONTACT = os.getenv("ADMIN_CONTACT", "@Akash_12121")
 
-FAMPAY_API_KEY = os.getenv("FAMPAY_API_KEY", "fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe")
-FAMPAY_UPI_ID = os.getenv("FAMPAY_UPI_ID", "8056317218@fam")
+FAMPAY_API_KEY = os.getenv("FAMPAY_API_KEY", "fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e")
+FAMPAY_UPI_ID = os.getenv("FAMPAY_UPI_ID", "")
 FAMPAY_QR_URL = os.getenv("FAMPAY_QR_URL", "https://fampay.anujbots.xyz/qr.php")
 FAMPAY_VERIFY_URL = os.getenv("FAMPAY_VERIFY_URL", "https://fampay.anujbots.xyz/verify.php")
 
@@ -95,9 +95,9 @@ RESELLER_API_URL = os.getenv("RESELLER_API_URL", "https://bantibhaiya.to/api/res
 RESELLER_API_KEY = os.getenv("RESELLER_API_KEY", "")
 RESELLER_MASTER_KEY = os.getenv("RESELLER_MASTER_KEY", "")
 
-PAYMENT_GATEWAY_URL = os.getenv("PAYMENT_GATEWAY_URL", "https://payment-gateway-87gk.onrender.com/api/create-order")
-PAYMENT_GATEWAY_TOKEN = os.getenv("PAYMENT_GATEWAY_TOKEN", "fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe")
-PAYMENT_REDIRECT_URL = os.getenv("PAYMENT_REDIRECT_URL", "https://yoursite.com/payment-success")
+PAYMENT_GATEWAY_URL = os.getenv("PAYMENT_GATEWAY_URL", "https://famgateway.in/api/create-order")
+PAYMENT_GATEWAY_TOKEN = os.getenv("PAYMENT_GATEWAY_TOKEN", "")
+PAYMENT_REDIRECT_URL = os.getenv("PAYMENT_REDIRECT_URL", "")
 
 USDT_TO_INR = float(os.getenv("USDT_TO_INR", "90.0"))
 VIP_DISCOUNT_PERCENTAGE = float(os.getenv("VIP_DISCOUNT_PERCENTAGE", "10.0"))
@@ -588,20 +588,7 @@ def init_db() -> None:
         default_settings.append((f"emoji_{slot}", emoji_id))
     
     for key, val in default_settings:
-        c.execute("INSERT OR IGNORE INTO settings (key, val) VALUES (?, ?)" if False else "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))
-
-    # Ensure payment gateway settings are upgraded from old domain/token
-    gw_upgrades = {
-        'payment_gateway_url': 'https://payment-gateway-87gk.onrender.com/api/create-order',
-        'payment_gateway_token': 'fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe',
-        'fampay_api_key': 'fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe',
-        'payment_redirect_url': 'https://yoursite.com/payment-success',
-        'fampay_upi_id': '8056317218@fam'
-    }
-    for k, v in gw_upgrades.items():
-        curr_row = c.execute("SELECT value FROM settings WHERE key=?", (k,)).fetchone()
-        if not curr_row or not curr_row[0] or "famgateway.in" in str(curr_row[0]) or "fam_a9527" in str(curr_row[0]):
-            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, v))
+        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))
 
     conn.commit()
     conn.close()
@@ -1064,27 +1051,21 @@ async def generate_fampay_qr(user_id: int, amount: float, upi_id: str = None) ->
         return {"status": "error", "message": str(e)}
 
 async def verify_fampay_payment(order_id: str) -> Dict[str, Any]:
-    """Verify payment using the configured Payment Gateway with multi-endpoint fallback."""
+    """Verify payment using the Admin-configured FamGateway / FamPay API with multi-endpoint fallback."""
     gateway_token = (get_setting("payment_gateway_token", "") or "").strip()
     if not gateway_token:
         gateway_token = (get_setting("fampay_api_key", FAMPAY_API_KEY) or "").strip()
-    if not gateway_token:
-        gateway_token = PAYMENT_GATEWAY_TOKEN
-
     gateway_url = (get_setting("payment_gateway_url", PAYMENT_GATEWAY_URL) or "").strip()
-    if not gateway_url:
-        gateway_url = "https://payment-gateway-87gk.onrender.com/api/create-order"
 
-    # Try Payment Gateway API verification
+    # Try 1: FamGateway API (if token provided)
     if gateway_token and gateway_token != "YOUR_FAMPAY_API_KEY":
         try:
-            from urllib.parse import urlsplit
+            from urllib.parse import urlsplit, urlunsplit
             parts = urlsplit(gateway_url.rstrip("/"))
-            verify_host = f"{parts.scheme}://{parts.netloc}" if (parts.scheme and parts.netloc) else "https://payment-gateway-87gk.onrender.com"
+            verify_host = f"{parts.scheme}://{parts.netloc}" if (parts.scheme and parts.netloc) else "https://famgateway.in"
             
-            # Query with primary Render gateway /api/order-status/{order_id} and fallback routes
+            # Query with multiple auth parameter conventions (famgateway.in requires ?api_key=...)
             verify_endpoints = [
-                f"{verify_host}/api/order-status/{urllib.parse.quote(order_id)}",
                 f"{verify_host}/api/verify-order.php?order_id={urllib.parse.quote(order_id)}&api_key={urllib.parse.quote(gateway_token)}",
                 f"{verify_host}/api/verify-order?order_id={urllib.parse.quote(order_id)}&api_key={urllib.parse.quote(gateway_token)}",
                 f"{verify_host}/api/verify-order.php?order_id={urllib.parse.quote(order_id)}&token={urllib.parse.quote(gateway_token)}",
@@ -1093,35 +1074,18 @@ async def verify_fampay_payment(order_id: str) -> Dict[str, Any]:
             
             headers = {
                 "Accept": "application/json",
-                "X-Api-Key": gateway_token,
                 "Authorization": f"Bearer {gateway_token}",
+                "X-Api-Key": gateway_token,
             }
             
             for endpoint in verify_endpoints:
                 try:
-                    status, body = await http_request("GET", endpoint, headers=headers, timeout=12)
+                    status, body = await http_request("GET", endpoint, headers=headers, timeout=10)
                     if 200 <= status < 300:
                         raw = body.decode("utf-8", errors="replace")
                         result = json.loads(raw)
-                        if isinstance(result, dict):
-                            order_status = str(result.get("status", "")).upper()
-                            if order_status in ("SUCCESS", "PAID", "COMPLETED", "DONE"):
-                                return {
-                                    "status": "success",
-                                    "data": {
-                                        "transaction_id": result.get("transaction_ref") or result.get("order_id") or order_id,
-                                        "utr": result.get("transaction_ref") or result.get("utr") or "CONFIRMED",
-                                        "sender_name": result.get("customer_name") or "UPI Sender",
-                                        "amount": result.get("amount"),
-                                        "payment_time_ist": result.get("created_at") or datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-                                    }
-                                }
-                            elif order_status in ("PENDING", "WAITING"):
-                                return {"status": "pending", "message": "Payment is pending confirmation."}
-                            elif order_status in ("EXPIRED", "FAILED", "CANCELLED"):
-                                return {"status": "expired", "message": f"Payment {order_status.lower()}."}
-                            elif result.get("status") in ("success", "ok", True) or (result.get("success") is True and "status" not in result):
-                                return result
+                        if isinstance(result, dict) and result.get("status") in ("success", "ok", True):
+                            return result
                 except Exception:
                     pass
         except Exception as e:
@@ -1771,44 +1735,32 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
     if inr_amount < 1:
         return await message_obj.edit_text("❌ <b>Minimum deposit is ₹1.</b>", reply_markup=back_kb("gateway_inr"), parse_mode="HTML")
     gateway_url = (get_setting("payment_gateway_url", PAYMENT_GATEWAY_URL) or "").strip()
-    if not gateway_url:
-        gateway_url = "https://payment-gateway-87gk.onrender.com/api/create-order"
     gateway_token = (get_setting("payment_gateway_token", "") or "").strip()
+    # Backward-compatible: use the existing FamPay API key field if gateway token is empty.
     if not gateway_token:
         gateway_token = (get_setting("fampay_api_key", "") or "").strip()
-    if not gateway_token:
-        gateway_token = PAYMENT_GATEWAY_TOKEN
-    gateway_redirect = (get_setting("payment_redirect_url", PAYMENT_REDIRECT_URL) or "").strip()
-    if not gateway_redirect:
-        gateway_redirect = "https://yoursite.com/payment-success"
+    gateway_redirect = (get_setting("payment_redirect_url", "") or "").strip()
 
-    # Payment Gateway flow
+    # New Admin-configured FamGateway flow.
     if gateway_token:
         try:
+            # FamGateway's canonical endpoint is /api/create-order.
+            # If an older /create-order.php URL was saved, normalize it.
             gateway_url = gateway_url.rstrip("/")
             if gateway_url.endswith("/api/create-order.php"):
                 gateway_url = gateway_url[:-5]
 
-            user_row = db_query("SELECT first_name, username FROM users WHERE user_id=?", (user_id,), fetchone=True)
-            c_name = "Customer"
-            if user_row:
-                c_name = (user_row[0] or user_row[1] or f"User_{user_id}").strip()
-            else:
-                c_name = f"User_{user_id}"
-            c_email = f"user_{user_id}@t.me"
-
-            payload = {
-                "amount": round(float(inr_amount), 2),
-                "customer_name": c_name,
-                "customer_email": c_email,
-                "redirect_url": gateway_redirect
-            }
+            payload = {"amount": round(float(inr_amount), 2)}
+            if gateway_redirect:
+                payload["redirect_url"] = gateway_redirect
+            payload["customer_name"] = str(user_id)
+            payload["custom_id"] = f"TG_{user_id}_{int(time.time())}"
 
             headers = {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "X-Api-Key": gateway_token,
                 "Authorization": f"Bearer {gateway_token}",
+                "X-Api-Key": gateway_token,
             }
 
             status, body = await http_request(
@@ -1822,54 +1774,49 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
                 result = {"status": "error", "message": raw[:500] or f"HTTP {status}"}
 
             if status < 200 or status >= 300:
-                logger.warning(f"Payment gateway create-order HTTP {status}: {raw[:500]}, falling back to UPI QR flow.")
+                logger.warning(f"FamGateway create-order HTTP {status}: {raw[:500]}, falling back to UPI QR flow.")
                 raise RuntimeError(f"Gateway HTTP {status}")
 
-            is_success = (
-                isinstance(result, dict) and (
-                    result.get("success") is True or 
-                    result.get("status") in ("success", "ok", True)
-                )
-            )
-            if not is_success:
-                logger.warning(f"Payment gateway create-order rejected: {result}, falling back to UPI QR flow.")
+            if not isinstance(result, dict) or result.get("status") not in ("success", "ok", True):
+                logger.warning(f"FamGateway create-order rejected: {result}, falling back to UPI QR flow.")
                 raise RuntimeError("Gateway rejected order creation")
 
             data = result.get("data") if isinstance(result.get("data"), dict) else result
             order_id = str(data.get("order_id") or data.get("id") or f"FG{user_id}{int(time.time())}")
-            qr_data_url = data.get("qr_data_url") or ""
-            qr_url = data.get("qr_url") or data.get("qr_image") or data.get("qr") or ""
+            qr_url = data.get("qr_url") or data.get("qr_image") or data.get("qr")
             checkout_url = data.get("checkout_url") or data.get("payment_url") or data.get("checkout")
-            if isinstance(checkout_url, str) and checkout_url.startswith("http://payment-gateway-87gk.onrender.com"):
-                checkout_url = checkout_url.replace("http://", "https://", 1)
-            upi_intent = data.get("upi_uri") or data.get("upi_intent") or data.get("upi_link") or ""
-            upi_id = data.get("merchant_upi_id") or data.get("upi_id") or ""
-            expires_at_str = data.get("expires_at_ist") or data.get("expires_at") or (datetime.now() + timedelta(minutes=10)).strftime("%d-%m-%Y %H:%M:%S")
+            upi_intent = data.get("upi_intent") or data.get("upi_link")
+            upi_id = data.get("upi_id") or ""
+            expires_at_str = data.get("expires_at_ist") or data.get("expires_at")
+            created_at = data.get("created_at_ist") or data.get("created_at") or datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
-            payment_url = checkout_url or qr_url or qr_data_url or upi_intent
-            if not payment_url and not upi_intent:
-                logger.warning(f"Gateway response has no checkout or QR URL: {result}, falling back to UPI QR flow.")
+            # A hosted checkout/QR URL is required to give the customer a payment action.
+            payment_url = checkout_url or qr_url
+            if not payment_url:
+                logger.warning(f"FamGateway response has no checkout/QR URL: {result}, falling back to UPI QR flow.")
                 raise RuntimeError("No payment URL in gateway response")
 
             try:
-                expiry_time = datetime.strptime(expires_at_str, "%d-%m-%Y %H:%M:%S") if expires_at_str and "-" in str(expires_at_str) else datetime.now() + timedelta(minutes=10)
+                expiry_time = datetime.strptime(expires_at_str, "%d-%m-%Y %H:%M:%S") if expires_at_str and "-" in str(expires_at_str) else datetime.now() + timedelta(minutes=5)
                 expires_timestamp = int(expiry_time.timestamp())
             except Exception:
-                expires_timestamp = int(time.time() + 600)
+                expires_timestamp = int(time.time() + 300)
 
             db_query(
                 "INSERT OR REPLACE INTO transactions (order_id, user_id, amount_inr, status, timestamp, qr_url, upi_id, expires_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
-                (order_id, user_id, inr_amount, int(time.time()), str(payment_url)[:500], upi_id, expires_timestamp)
+                (order_id, user_id, inr_amount, int(time.time()), payment_url, upi_id, expires_timestamp)
             )
 
+            # Telegram does not allow UPI deep-links (upi://) as inline-button URLs.
+            # Display the QR image directly inside the bot instead.
             buttons = []
             buttons.append([InlineKeyboardButton(text="🔄 Verify Payment", callback_data=f"verify_{order_id}", style="primary")])
             hosted_url = checkout_url if isinstance(checkout_url, str) and checkout_url.startswith(("https://", "http://")) else None
             qr_open_url = qr_url if isinstance(qr_url, str) and qr_url.startswith(("https://", "http://")) else None
             if hosted_url:
-                buttons.append([InlineKeyboardButton(text="💳 Pay Now / Checkout", url=hosted_url, style="success")])
+                buttons.append([InlineKeyboardButton(text="💳 Open Payment", url=hosted_url, style="success")])
             elif qr_open_url:
-                buttons.append([InlineKeyboardButton(text="🖼 Open QR Code", url=qr_open_url, style="success")])
+                buttons.append([InlineKeyboardButton(text="🖼 Open QR", url=qr_open_url, style="success")])
             buttons.append([InlineKeyboardButton(text="Cancel", callback_data="menu_add_balance", style="danger")])
             kb = InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -1877,65 +1824,52 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
                 "🧾 <b>PAYMENT ORDER CREATED</b>\n\n"
                 f"💵 <b>Amount:</b> {fmt_curr(inr_amount)}\n"
                 f"🆔 <b>Order ID:</b> <code>{html.escape(order_id)}</code>\n"
-                f"🏦 <b>UPI ID:</b> <code>{html.escape(str(upi_id or 'Gateway Checkout'))}</code>\n"
-                f"⏳ <b>Expires:</b> {html.escape(str(expires_at_str or '10 minutes'))}\n\n"
-                "📱 <b>Scan the QR code below</b> or tap <b>Pay Now</b> to pay the exact amount.\n"
+                f"🏦 <b>UPI ID:</b> <code>{html.escape(str(upi_id or 'Gateway checkout'))}</code>\n"
+                f"⏳ <b>Expires:</b> {html.escape(str(expires_at_str or '5 minutes'))}\n\n"
+                "📱 <b>Scan the QR code below</b> and pay the exact amount.\n"
                 "After payment, tap <b>Verify Payment</b>."
             )
 
-            log_activity(user_id, "GENERATE_INVOICE_GATEWAY", f"Amount: {inr_amount}, Order ID: {order_id}")
+            log_activity(user_id, "GENERATE_INVOICE_FAMGATEWAY", f"Amount: {inr_amount}, Order ID: {order_id}")
 
-            qr_bytes = None
-            if qr_data_url and isinstance(qr_data_url, str) and "base64," in qr_data_url:
+            # Send the gateway-generated QR image directly into this Telegram chat.
+            # If downloading the gateway QR fails, fall back to the checkout URL button.
+            if qr_url:
                 try:
-                    import base64
-                    b64_part = qr_data_url.split("base64,", 1)[1]
-                    qr_bytes = base64.b64decode(b64_part)
-                except Exception as b64_err:
-                    logger.warning(f"Error decoding qr_data_url base64: {b64_err}")
-
-            if not qr_bytes and qr_url and isinstance(qr_url, str) and qr_url.startswith(("http://", "https://")):
-                try:
-                    qr_status, downloaded = await http_request("GET", qr_url, timeout=12)
-                    if 200 <= qr_status < 300 and downloaded:
-                        qr_bytes = downloaded
-                except Exception as dl_err:
-                    logger.warning(f"Error downloading qr_url: {dl_err}")
-
-            if not qr_bytes and upi_intent:
-                try:
-                    import qrcode
-                    import io
-                    qr_img = qrcode.make(upi_intent)
-                    buf = io.BytesIO()
-                    qr_img.save(buf, format="PNG")
-                    qr_bytes = buf.getvalue()
-                except Exception as qrc_err:
-                    logger.warning(f"Error generating QR from upi_intent: {qrc_err}")
-
-            if qr_bytes:
-                try:
-                    qr_file = BufferedInputFile(qr_bytes, filename=f"payment_{order_id}.png")
+                    # Telegram can fetch the public FamGateway QR image directly.
                     try:
                         await message_obj.delete()
                     except Exception:
                         pass
                     await bot.send_photo(
                         chat_id=user_id,
-                        photo=qr_file,
+                        photo=qr_url,
                         caption=text,
                         reply_markup=kb,
                         parse_mode="HTML"
                     )
                     return
                 except Exception as direct_qr_error:
-                    logger.warning(f"Direct QR send failed: {direct_qr_error}")
+                    logger.warning(f"Direct QR send failed, trying download fallback: {direct_qr_error}")
+                    try:
+                        qr_status, qr_bytes = await http_request("GET", qr_url, timeout=15)
+                        if 200 <= qr_status < 300 and qr_bytes:
+                            qr_file = BufferedInputFile(qr_bytes, filename=f"payment_{order_id}.png")
+                            try:
+                                await message_obj.delete()
+                            except Exception:
+                                pass
+                            await bot.send_photo(chat_id=user_id, photo=qr_file, caption=text, reply_markup=kb, parse_mode="HTML")
+                            return
+                        logger.error(f"QR download failed: HTTP {qr_status}")
+                    except Exception as qr_error:
+                        logger.exception(f"Gateway QR image download failed: {qr_error}")
 
-            # Final fallback: edit text message
+            # Final fallback: keep the payment order message if the QR image cannot be downloaded.
             await message_obj.edit_text(text, reply_markup=kb, parse_mode="HTML")
             return
         except Exception as e:
-            logger.warning(f"Payment gateway create-order failed ({e}), falling back to direct UPI QR payment flow.")
+            logger.warning(f"FamGateway create-order failed ({e}), falling back to direct UPI QR payment flow.")
 
     # ==============================================================================
     # AUTOMATIC FAIL-SAFE FALLBACK: DIRECT UPI QR PAYMENT GENERATION

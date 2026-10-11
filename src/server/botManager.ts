@@ -983,7 +983,7 @@ async def http_request(method: str, url: str, headers: Optional[Dict[str, str]] 
 
   // Pre-define standard FamPay and Gateway fallback variables if referenced
   if (code.includes('FAMPAY_API_KEY') && !code.includes('FAMPAY_API_KEY =') && !code.includes('FAMPAY_API_KEY=')) {
-    header += `FAMPAY_API_KEY = os.getenv("FAMPAY_API_KEY", "fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe")\n`;
+    header += `FAMPAY_API_KEY = os.getenv("FAMPAY_API_KEY", "fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e")\n`;
   }
 
   if (header) {
@@ -1435,10 +1435,8 @@ export async function deployPythonBotFromFile(
 
   // Copy over common env vars from previous bots if available (e.g. FAMPAY_API_KEY)
   const previousEnvVars: Record<string, string> = {
-    FAMPAY_API_KEY: 'fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe',
-    PAYMENT_GATEWAY_TOKEN: 'fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe',
-    PAYMENT_GATEWAY_URL: 'https://payment-gateway-87gk.onrender.com/api/create-order',
-    PAYMENT_REDIRECT_URL: 'https://yoursite.com/payment-success'
+    FAMPAY_API_KEY: 'fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e',
+    PAYMENT_GATEWAY_TOKEN: 'fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e'
   };
   const prevBot = hostedPythonBots.find(b => (b.senderId === meta.senderId || b.senderUsername === meta.senderUsername) && b.envVars);
   if (prevBot && prevBot.envVars) {
