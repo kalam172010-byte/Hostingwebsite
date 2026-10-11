@@ -2977,7 +2977,7 @@ async def exec_warn_user(m: Message, state: FSMContext):
 # ==============================================================================
 @dp.callback_query(F.data == "admin_view_stats")
 async def admin_dashboard_stats(call: CallbackQuery):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     t_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
     t_resellers = db_query("SELECT COUNT(*) FROM users WHERE is_reseller=1", fetchone=True)[0]
     t_vip = db_query("SELECT COUNT(*) FROM users WHERE is_vip=1", fetchone=True)[0]
@@ -2994,7 +2994,7 @@ async def admin_dashboard_stats(call: CallbackQuery):
 # ==============================================================================
 @dp.callback_query(F.data == "admin_add_prod")
 async def add_prod_start(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     for cat in FIXED_CATEGORIES:
         emoji_id = get_category_emoji(cat)
@@ -3004,7 +3004,7 @@ async def add_prod_start(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("addprod_cat_"))
 async def add_prod_category_selected(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     category = call.data.split("addprod_cat_", 1)[1]
     await state.update_data(cat=category)
     
@@ -3471,7 +3471,7 @@ async def admin_delete_product(call: CallbackQuery):
 # ==============================================================================
 @dp.callback_query(F.data == "admin_view_tickets")
 async def admin_view_tickets(call: CallbackQuery):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     tickets = db_query("SELECT id, user_id, message, created_at FROM tickets WHERE status='Open' LIMIT 1", fetchall=True)
     if not tickets: return await call.answer("✅ Zero pending issues. Grid is clean!", show_alert=True)
     t = tickets[0]
@@ -3510,7 +3510,7 @@ async def send_ticket_reply(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_broadcast_btn")
 async def admin_broadcast_start(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("📢 <b>Mass Broadcast Protocol</b>\n\nSend the rich message payload you wish to transmit globally across the grid:", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.broadcast_msg)
 
@@ -3530,7 +3530,7 @@ async def admin_broadcast_send(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_create_coupon")
 async def admin_create_coupon_start(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("🎟 Enter a highly secure alphanumeric sequence for the Promo Code:", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.add_coupon_code)
 
@@ -3563,7 +3563,7 @@ async def admin_coupon_uses(m: Message, state: FSMContext):
 # ==============================================================================
 @dp.callback_query(F.data == "admin_reseller_menu")
 async def admin_reseller_menu(call: CallbackQuery):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     status_check = db_query("SELECT value FROM settings WHERE key='reseller_system_status'", fetchone=True)
     sys_status = status_check[0] if status_check else "ON"
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -3576,7 +3576,7 @@ async def admin_reseller_menu(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_toggle_reseller_sys")
 async def toggle_reseller_sys(call: CallbackQuery):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     res = db_query("SELECT value FROM settings WHERE key='reseller_system_status'", fetchone=True)
     current = res[0] if res else 'ON'
     new_status = 'OFF' if current == 'ON' else 'ON'
@@ -3619,7 +3619,7 @@ async def reseller_view(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_toggle_bot")
 async def toggle_bot(call: CallbackQuery):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     res = db_query("SELECT value FROM settings WHERE key='bot_status'", fetchone=True)
     current = res[0] if res else 'ON'
     new_status = 'OFF' if current == 'ON' else 'ON'
@@ -3629,7 +3629,7 @@ async def toggle_bot(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_set_video")
 async def admin_set_video_start(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("📹 Input direct streaming / YouTube Link for Tutorial system:\n<i>(Or type 'None' to clear registry):</i>", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_howto_video)
 
@@ -3799,7 +3799,7 @@ async def save_emoji_slot(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_edit_ui_menu")
 async def admin_edit_ui_menu(call: CallbackQuery):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Edit Start Menu Text", callback_data="edit_ui_start", style="primary")],
         [InlineKeyboardButton(text="Edit VIP Menu Text", callback_data="edit_ui_vip", style="primary")],
@@ -3810,7 +3810,7 @@ async def admin_edit_ui_menu(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("edit_ui_"))
 async def admin_edit_ui_prompt(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     ui_key = call.data.split("_")[2]
     await state.update_data(ui_key=ui_key)
     current_text = get_ui_text(ui_key)
@@ -3828,7 +3828,7 @@ async def admin_save_ui_text(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_edit_reseller_price")
 async def admin_edit_reseller_price_start(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     prods = db_query("SELECT id, name, category, panel_name, reseller_price FROM products ORDER BY category, panel_name", fetchall=True)
     if not prods: return await call.message.edit_text("No products to edit.", reply_markup=admin_back_kb(), parse_mode='HTML')
     kb = InlineKeyboardMarkup(inline_keyboard=[])
@@ -3841,7 +3841,7 @@ async def admin_edit_reseller_price_start(call: CallbackQuery, state: FSMContext
 
 @dp.callback_query(F.data.startswith("edit_reseller_"))
 async def admin_edit_reseller_price_prompt(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     prod_id = int(call.data.split("_")[2])
     await state.update_data(edit_reseller_prod_id=prod_id)
     await call.message.edit_text("💰 Enter the new <b>Reseller Price</b> in Rupees (₹) for this product:", reply_markup=admin_back_kb(), parse_mode='HTML')
@@ -3860,7 +3860,7 @@ async def admin_save_reseller_price(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_set_reseller_fee")
 async def admin_set_reseller_fee(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("💰 Enter the new <b>Reseller Setup Fee</b> in Rupees (₹):\nCurrent: " + get_setting("reseller_setup_fee", "200.0"), reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_reseller_setup_fee)
 
@@ -3875,7 +3875,7 @@ async def admin_save_reseller_fee(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_set_reseller_min")
 async def admin_set_reseller_min(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("💳 Enter the new <b>Minimum Balance</b> required to become reseller (₹):\nCurrent: " + get_setting("reseller_min_balance", "500.0"), reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_reseller_min_balance)
 
@@ -3890,7 +3890,7 @@ async def admin_save_reseller_min(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_set_support_links")
 async def admin_set_support_links(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📞 Set Telegram Link", callback_data="admin_set_telegram", style="primary")],
         [InlineKeyboardButton(text="📱 Set WhatsApp Link", callback_data="admin_set_whatsapp", style="primary")],
@@ -3900,7 +3900,7 @@ async def admin_set_support_links(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_set_telegram")
 async def admin_set_telegram(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("✈️ Enter the Telegram contact URL (e.g., https://t.me/YourSupport):", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_support_telegram)
 
@@ -3913,7 +3913,7 @@ async def save_telegram_link(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_set_whatsapp")
 async def admin_set_whatsapp(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("📱 Enter the WhatsApp contact URL (e.g., https://wa.me/1234567890):", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_support_whatsapp)
 
@@ -4101,7 +4101,7 @@ def mask_secret(value: str) -> str:
 
 @dp.callback_query(F.data == "admin_api_setup")
 async def admin_api_setup(call: CallbackQuery):
-    if not is_admin_user(call.from_user.id):
+    if call.from_user.id != ADMIN_ID:
         return
     reseller_url = get_setting("reseller_api_url", RESELLER_API_URL)
     reseller_key = get_setting("reseller_api_key", "")
@@ -4130,7 +4130,7 @@ async def admin_api_setup(call: CallbackQuery):
 
 @dp.callback_query(F.data == "api_reseller_url")
 async def api_reseller_url_prompt(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("🌐 Send the Bantibhaiya <b>Reseller API URL</b>:", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_reseller_api_url)
 
@@ -4146,7 +4146,7 @@ async def api_reseller_url_save(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "api_reseller_key")
 async def api_reseller_key_prompt(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("🔑 Send the Bantibhaiya <b>API Key</b>:", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_reseller_api_key)
 
@@ -4160,7 +4160,7 @@ async def api_reseller_key_save(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "api_reseller_master")
 async def api_reseller_master_prompt(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("🛡 Send the Bantibhaiya <b>Master Key</b>:", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_reseller_master_key)
 
@@ -4174,7 +4174,7 @@ async def api_reseller_master_save(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "api_gateway_url")
 async def api_gateway_url_prompt(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("💳 Send the <b>Payment Gateway API URL</b>:", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_gateway_api_url)
 
@@ -4190,7 +4190,7 @@ async def api_gateway_url_save(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "api_gateway_token")
 async def api_gateway_token_prompt(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("🔒 Send the <b>Payment Gateway Bearer Token</b>:", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_gateway_token)
 
@@ -4200,12 +4200,11 @@ async def api_gateway_token_save(m: Message, state: FSMContext):
     if value.lower()=="/cancel":
         await state.clear(); return await m.answer("❌ Cancelled.", reply_markup=admin_kb())
     set_setting("payment_gateway_token", value)
-    set_setting("fampay_api_key", value)
     await state.clear(); await m.answer("✅ Payment gateway token saved.", reply_markup=admin_kb())
 
 @dp.callback_query(F.data == "api_gateway_redirect")
 async def api_gateway_redirect_prompt(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("↪️ Send the <b>Payment Redirect URL</b> (HTTPS recommended):", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_gateway_redirect)
 
@@ -4221,7 +4220,7 @@ async def api_gateway_redirect_save(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_setup_fampay")
 async def setup_fampay_start(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     current_api = get_setting("fampay_api_key", "") # Fetch current API key for display
     current_upi = get_setting("fampay_upi_id", "") # Fetch current UPI ID for display
     await call.message.edit_text(
@@ -4257,7 +4256,7 @@ async def setup_fampay_upi(m: Message, state: FSMContext):
 # ==============================================================================
 @dp.callback_query(F.data == "admin_setup_binance")
 async def setup_binance_start(call: CallbackQuery, state: FSMContext):
-    if not is_admin_user(call.from_user.id): return
+    if call.from_user.id != ADMIN_ID: return
     await call.message.edit_text("🪙 <b>CRYPTO NODE INIT: Step 1/3</b>\nInput Master <b>Binance API Key</b>:\n<i>(Type /cancel to halt protocol)</i>", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_binance_api)
 
@@ -4305,13 +4304,10 @@ def start_render_health_server():
             def log_message(self, format, *args):
                 pass
         def serve():
-            try:
-                socketserver.TCPServer.allow_reuse_address = True
-                with socketserver.TCPServer(("0.0.0.0", port), RenderHealthHandler) as httpd:
-                    logger.info(f"🌐 [Render Web Mode] 24/7 Health check server listening on 0.0.0.0:{port}")
-                    httpd.serve_forever()
-            except Exception as e:
-                logger.info(f"[Render Web Mode] Notice: Health server port {port} already bound or unavailable ({e}). Continuing bot operations.")
+            socketserver.TCPServer.allow_reuse_address = True
+            with socketserver.TCPServer(("0.0.0.0", port), RenderHealthHandler) as httpd:
+                logger.info(f"🌐 [Render Web Mode] 24/7 Health check server listening on 0.0.0.0:{port}")
+                httpd.serve_forever()
         t = threading.Thread(target=serve, daemon=True)
         t.start()
     except Exception as e:
