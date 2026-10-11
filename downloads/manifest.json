@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "id": "sub_disc_1791641184842_0qam",
+    "botId": "bot_primary",
+    "senderId": 8808556338,
+    "senderUsername": "TelegramUser",
+    "fileName": "FREE_FIRE_SELLING_BOT_UPDATED.py",
+    "fileSizeMB": 0.221,
+    "mimeType": "text/x-python",
+    "caption": "Received file in cloud downloads",
+    "status": "COMPLETED",
+    "reason": "Received in cloud storage",
+    "approvalReason": "Received in cloud storage",
+    "timestamp": "2:04:51 PM",
+    "localFilePath": "/app/applet/downloads/bot_master_primary/FREE_FIRE_SELLING_BOT_UPDATED.py",
+    "downloadedPath": "/app/applet/downloads/bot_master_primary/FREE_FIRE_SELLING_BOT_UPDATED.py"
+  }
+]

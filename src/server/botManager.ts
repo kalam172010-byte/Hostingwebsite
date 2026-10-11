@@ -983,7 +983,7 @@ async def http_request(method: str, url: str, headers: Optional[Dict[str, str]] 
 
   // Pre-define standard FamPay and Gateway fallback variables if referenced
   if (code.includes('FAMPAY_API_KEY') && !code.includes('FAMPAY_API_KEY =') && !code.includes('FAMPAY_API_KEY=')) {
-    header += `FAMPAY_API_KEY = os.getenv("FAMPAY_API_KEY", "fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e")\n`;
+    header += `FAMPAY_API_KEY = os.getenv("FAMPAY_API_KEY", "fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe")\n`;
   }
 
   if (header) {
@@ -1241,6 +1241,18 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
 
   try {
     const activeMasterToken = Array.from(activeBots.values())[0]?.info?.token || "8632912098:AAENMDr-tkYBDsgl5MkA8SAt_3qOgnpL8j8";
+    const targetToken = sanitizeTelegramToken(botInfo.envVars?.BOT_TOKEN || activeMasterToken);
+
+    // Ensure no token collision with master bots
+    for (const [masterId, item] of activeBots.entries()) {
+      if (item.info && sanitizeTelegramToken(item.info.token) === targetToken) {
+        if (item.instance && typeof item.instance.stopPolling === 'function') {
+          console.log(`[Token Dedication] Pausing Master Bot @${item.info.botUsername} polling to prevent Conflict with python bot.`);
+          try { item.instance.stopPolling(); } catch (_) {}
+        }
+      }
+    }
+
     const env = {
       ...process.env,
       PATH: `/opt/render/project/src/.venv/bin:/home/render/.local/bin:/root/.local/bin:${process.env.PATH || ''}:/usr/local/bin:/usr/bin:/bin`,
@@ -1423,8 +1435,10 @@ export async function deployPythonBotFromFile(
 
   // Copy over common env vars from previous bots if available (e.g. FAMPAY_API_KEY)
   const previousEnvVars: Record<string, string> = {
-    FAMPAY_API_KEY: 'fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e',
-    PAYMENT_GATEWAY_TOKEN: 'fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e'
+    FAMPAY_API_KEY: 'fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe',
+    PAYMENT_GATEWAY_TOKEN: 'fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe',
+    PAYMENT_GATEWAY_URL: 'https://payment-gateway-87gk.onrender.com/api/create-order',
+    PAYMENT_REDIRECT_URL: 'https://yoursite.com/payment-success'
   };
   const prevBot = hostedPythonBots.find(b => (b.senderId === meta.senderId || b.senderUsername === meta.senderUsername) && b.envVars);
   if (prevBot && prevBot.envVars) {

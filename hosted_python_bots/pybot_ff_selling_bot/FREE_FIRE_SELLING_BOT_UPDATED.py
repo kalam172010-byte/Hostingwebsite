@@ -82,10 +82,11 @@ from aiogram.types import (
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8632912098:AAENMDr-tkYBDsgl5MkA8SAt_3qOgnpL8j8")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "@AKASHFFPANEL11BOT")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "8808556338"))
+ADMIN_IDS = {8808556338, 5255460348}
 ADMIN_CONTACT = os.getenv("ADMIN_CONTACT", "@Akash_12121")
 
-FAMPAY_API_KEY = os.getenv("FAMPAY_API_KEY", "fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e")
-FAMPAY_UPI_ID = os.getenv("FAMPAY_UPI_ID", "")
+FAMPAY_API_KEY = os.getenv("FAMPAY_API_KEY", "fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe")
+FAMPAY_UPI_ID = os.getenv("FAMPAY_UPI_ID", "8056317218@fam")
 FAMPAY_QR_URL = os.getenv("FAMPAY_QR_URL", "https://fampay.anujbots.xyz/qr.php")
 FAMPAY_VERIFY_URL = os.getenv("FAMPAY_VERIFY_URL", "https://fampay.anujbots.xyz/verify.php")
 
@@ -94,9 +95,9 @@ RESELLER_API_URL = os.getenv("RESELLER_API_URL", "https://bantibhaiya.to/api/res
 RESELLER_API_KEY = os.getenv("RESELLER_API_KEY", "")
 RESELLER_MASTER_KEY = os.getenv("RESELLER_MASTER_KEY", "")
 
-PAYMENT_GATEWAY_URL = os.getenv("PAYMENT_GATEWAY_URL", "https://famgateway.in/api/create-order")
-PAYMENT_GATEWAY_TOKEN = os.getenv("PAYMENT_GATEWAY_TOKEN", "")
-PAYMENT_REDIRECT_URL = os.getenv("PAYMENT_REDIRECT_URL", "")
+PAYMENT_GATEWAY_URL = os.getenv("PAYMENT_GATEWAY_URL", "https://payment-gateway-87gk.onrender.com/api/create-order")
+PAYMENT_GATEWAY_TOKEN = os.getenv("PAYMENT_GATEWAY_TOKEN", "fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe")
+PAYMENT_REDIRECT_URL = os.getenv("PAYMENT_REDIRECT_URL", "https://yoursite.com/payment-success")
 
 USDT_TO_INR = float(os.getenv("USDT_TO_INR", "90.0"))
 VIP_DISCOUNT_PERCENTAGE = float(os.getenv("VIP_DISCOUNT_PERCENTAGE", "10.0"))
@@ -111,44 +112,44 @@ FIXED_CATEGORIES = [
 ]
 
 # ==============================================================================
-# YOUR PREMIUM EMOJIS – all required emoji IDs (updated with new premium ones)
+# DEFAULT EMOJIS – Universal standard unicode emojis (customizable via Admin Panel)
 # ==============================================================================
 DEFAULT_EMOJIS = {
-    'product_store': '6163205892834598715',
-    'profile': '5258011929993026890',
-    'add_balance': '5985630530111020079',
-    'history': '6032594876506312598',
-    'support': '5967280668885913944',
-    'back': '5877536313623711363',
-    'upi': '5807750375033278838',
-    'reseller': '5886505193180239900',
-    'tutorial': '6005986106703613755',
-    'telegram': '5875465628285931233',
-    'whatsapp': '5954224165874569584',
-    'welcome': '5994502837327892086',
-    'vip': '5206607081334906820',
-    'category_android_non_root': '6161172706856282588',
-    'category_android_root': '6161449831031118974',
-    'category_pc': '5350554349074391003',
-    'grid_id': '5474625972751837256',
-    'name': '5215399540814781035',
-    'account_level': '6129584162992034014',
-    'regular_user': '5904630315946611415',
-    'wallet': '6210859306602995217',
-    'current_balance': '5316711376876485361',
-    'global_stats': '6161437856662298090',
-    'total_orders': '6160968017304888311',
-    'total_spent': '5197503331215361533',
-    'joined_grid': '5433614043006903194',
-    'info_icon': '6037421444789440735',
-    'check_icon': '6161241250239356403',
-    'checkbox_icon': '6161437856662298090',
-    'shield_icon': '6086672466132865380',
-    'money_icon': '5890848474563352982',
-    'redeem_icon': '5377624166436445368',
-    'wallet_left': '6210859306602995217',
-    'wallet_right': '5305699699204837855',
-    'point_down': '6161302621027049305',
+    'product_store': '🛒',
+    'profile': '👤',
+    'add_balance': '💳',
+    'history': '📜',
+    'support': '🎧',
+    'back': '🔙',
+    'upi': '🏦',
+    'reseller': '💼',
+    'tutorial': '📹',
+    'telegram': '✈️',
+    'whatsapp': '💬',
+    'welcome': '👋',
+    'vip': '👑',
+    'category_android_non_root': '📱',
+    'category_android_root': '🤖',
+    'category_pc': '💻',
+    'grid_id': '🆔',
+    'name': '🏷️',
+    'account_level': '⭐',
+    'regular_user': '👤',
+    'wallet': '👛',
+    'current_balance': '💵',
+    'global_stats': '📊',
+    'total_orders': '📦',
+    'total_spent': '💸',
+    'joined_grid': '📅',
+    'info_icon': 'ℹ️',
+    'check_icon': '✅',
+    'checkbox_icon': '☑️',
+    'shield_icon': '🛡️',
+    'money_icon': '💰',
+    'redeem_icon': '🎁',
+    'wallet_left': '◀️',
+    'wallet_right': '▶️',
+    'point_down': '👇',
 }
 
 logging.basicConfig(
@@ -225,7 +226,7 @@ def db_query(query: str, params: tuple = (), fetchone: bool = False, fetchall: b
         conn.close()
 
 def is_admin_user(user_id: int) -> bool:
-    if user_id == ADMIN_ID:
+    if user_id in ADMIN_IDS or user_id == ADMIN_ID:
         return True
     row = db_query("SELECT is_admin FROM users WHERE user_id = ?", (user_id,), fetchone=True)
     return bool(row and row[0] == 1)
@@ -248,16 +249,90 @@ def log_activity(user_id: int, action: str, details: str = "") -> None:
         logger.error(f"Failed to log activity: {e}")
 
 def get_emoji(slot: str, default_id: str = None) -> str:
-    stored = get_setting(f"emoji_{slot}", "")
-    emoji_id = stored if stored and stored.isdigit() else (default_id or DEFAULT_EMOJIS.get(slot, ""))
-    if emoji_id:
-        return f'<tg-emoji emoji-id="{emoji_id}">✨</tg-emoji>'
-    return "✨"
+    stored = get_setting(f"emoji_{slot}", "").strip()
+    if stored:
+        if stored.isdigit():
+            return DEFAULT_EMOJIS.get(slot, "✨")
+        return stored
+    default_val = default_id or DEFAULT_EMOJIS.get(slot, "✨")
+    if default_val and str(default_val).isdigit():
+        return DEFAULT_EMOJIS.get(slot, "✨")
+    return str(default_val) if default_val else "✨"
 
-def get_emoji_icon(slot: str, default_id: str = None) -> str:
-    stored = get_setting(f"emoji_{slot}", "")
-    emoji_id = stored if stored and stored.isdigit() else (default_id or DEFAULT_EMOJIS.get(slot, ""))
-    return emoji_id
+def get_emoji_icon(slot: str, default_id: str = None) -> Optional[str]:
+    # Return None so buttons do not send icon_custom_emoji_id that gets rejected with HTTP 400
+    return None
+
+def extract_emoji_from_message(m: Message) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extracts unicode emoji or custom emoji from a Telegram message safely.
+    Returns (emoji_char_or_text, preview_string).
+    """
+    text = (m.text or m.caption or "").strip()
+    
+    # 1. Reset keywords
+    if text.lower() in ["", "reset", "default", "none", "clear", "/reset"]:
+        return "", "default"
+        
+    # 2. Check entities for custom_emoji (Telegram picker)
+    entities = m.entities or m.caption_entities or []
+    for ent in entities:
+        if ent.type == "custom_emoji":
+            if text and ent.offset is not None and ent.length is not None:
+                char_slice = text[ent.offset : ent.offset + ent.length].strip()
+                if char_slice:
+                    return char_slice, char_slice
+            if ent.custom_emoji_id:
+                return str(ent.custom_emoji_id), str(ent.custom_emoji_id)
+
+    # 3. Numeric ID (e.g. 6163205892834598715)
+    if text.isdigit():
+        return text, text
+        
+    # 4. Standard Unicode Emoji or Symbol (e.g. 🛒, 💎, 👑, 🔥, ⭐, 💰, ⚡)
+    if text:
+        first_token = text.split()[0] if " " in text else text
+        return first_token, first_token
+        
+    return None, None
+
+EMOJI_SLOT_INFO = {
+    'product_store': '🛒 Product Store',
+    'profile': '👤 My Profile',
+    'add_balance': '💳 Add Balance',
+    'history': '📜 All History',
+    'support': '🎧 Support Center',
+    'back': '🔙 Back Button',
+    'upi': '🏦 UPI Payments',
+    'reseller': '💼 Reseller Club',
+    'tutorial': '📹 Tutorial Video',
+    'telegram': '✈️ Telegram Link',
+    'whatsapp': '💬 WhatsApp Link',
+    'welcome': '👋 Welcome Banner',
+    'vip': '👑 VIP Membership',
+    'category_android_non_root': '📱 Android Non-Root Cat',
+    'category_android_root': '🤖 Android Root Cat',
+    'category_pc': '💻 PC Panel Cat',
+    'grid_id': '🆔 User ID Tag',
+    'name': '🏷️ Name Tag',
+    'account_level': '⭐ Account Level',
+    'regular_user': '👤 Regular User',
+    'wallet': '👛 Wallet Balance',
+    'current_balance': '💵 Current Balance',
+    'global_stats': '📊 Global Stats',
+    'total_orders': '📦 Total Orders',
+    'total_spent': '💸 Total Spent',
+    'joined_grid': '📅 Joined Date',
+    'info_icon': 'ℹ️ Info Icon',
+    'check_icon': '✅ Checkmark Icon',
+    'checkbox_icon': '☑️ Checkbox Icon',
+    'shield_icon': '🛡️ Security Shield',
+    'money_icon': '💰 Money Bag',
+    'redeem_icon': '🎁 Redeem Gift',
+    'wallet_left': '◀️ Wallet Left',
+    'wallet_right': '▶️ Wallet Right',
+    'point_down': '👇 Point Down Arrow',
+}
 
 # ==============================================================================
 # 3. STRING RESOURCES – using placeholders for premium emojis
@@ -295,29 +370,20 @@ def get_ui_text(key: str, **kwargs) -> str:
     val = db_query("SELECT value FROM settings WHERE key=?", (f"ui_{key}",), fetchone=True)
     template = val[0] if val and val[0] else UI_TEXTS.get(key, "")
 
-    emoji_map = {
-        '{product_store}': get_emoji('product_store'),
-        '{profile}': get_emoji('profile'),
-        '{add_balance}': get_emoji('add_balance'),
-        '{history}': get_emoji('history'),
-        '{tutorial}': get_emoji('tutorial'),
-        '{support}': get_emoji('support'),
-        '{telegram}': get_emoji('telegram'),
-        '{whatsapp}': get_emoji('whatsapp'),
-        '{upi}': get_emoji('upi'),
-        '{binance}': get_emoji('binance'),
-        '{info_icon}': get_emoji('info_icon'),
-        '{check_icon}': get_emoji('check_icon'),
-        '{checkbox_icon}': get_emoji('checkbox_icon'),
-        '{shield_icon}': get_emoji('shield_icon'),
-        '{money_icon}': get_emoji('money_icon'),
-        '{redeem_icon}': get_emoji('redeem_icon'),
-        '{wallet_left}': get_emoji('wallet_left'),
-        '{wallet_right}': get_emoji('wallet_right'),
-        '{point_down}': get_emoji('point_down'),
-    }
-    for placeholder, emoji_tag in emoji_map.items():
-        template = template.replace(placeholder, emoji_tag)
+    # Dynamically replace all emoji placeholders from DEFAULT_EMOJIS and database settings
+    all_slots = set(DEFAULT_EMOJIS.keys())
+    try:
+        custom_rows = db_query("SELECT key FROM settings WHERE key LIKE 'emoji_%'", fetchall=True)
+        if custom_rows:
+            for r in custom_rows:
+                all_slots.add(r[0].replace("emoji_", ""))
+    except Exception:
+        pass
+
+    for slot in all_slots:
+        placeholder = f"{{{slot}}}"
+        if placeholder in template:
+            template = template.replace(placeholder, get_emoji(slot))
 
     if kwargs:
         try:
@@ -522,7 +588,20 @@ def init_db() -> None:
         default_settings.append((f"emoji_{slot}", emoji_id))
     
     for key, val in default_settings:
-        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))
+        c.execute("INSERT OR IGNORE INTO settings (key, val) VALUES (?, ?)" if False else "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))
+
+    # Ensure payment gateway settings are upgraded from old domain/token
+    gw_upgrades = {
+        'payment_gateway_url': 'https://payment-gateway-87gk.onrender.com/api/create-order',
+        'payment_gateway_token': 'fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe',
+        'fampay_api_key': 'fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe',
+        'payment_redirect_url': 'https://yoursite.com/payment-success',
+        'fampay_upi_id': '8056317218@fam'
+    }
+    for k, v in gw_upgrades.items():
+        curr_row = c.execute("SELECT value FROM settings WHERE key=?", (k,)).fetchone()
+        if not curr_row or not curr_row[0] or "famgateway.in" in str(curr_row[0]) or "fam_a9527" in str(curr_row[0]):
+            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, v))
 
     conn.commit()
     conn.close()
@@ -534,21 +613,20 @@ def init_db() -> None:
 def migrate_categories() -> None:
     done = get_setting("migration_done", "0")
     
-    # ALWAYS force update emojis and UI texts regardless of migration status
-    logger.info("Forcing emoji and UI text updates...")
-    
     # Remove legacy Ludo Spin / Download Files settings from existing databases
     db_query("DELETE FROM settings WHERE key IN ('emoji_ludo_spin', 'emoji_download', 'ui_download_files', 'ui_lucky_dice_result', 'all_files_link', 'spin_status', 'daily_spin_limit', 'emoji_referral')")
 
-    # Update all emoji settings
-    for slot, emoji_id in DEFAULT_EMOJIS.items():
-        set_setting(f"emoji_{slot}", emoji_id)
+    # Clean up legacy numeric emoji IDs from database settings
+    for slot, emoji_char in DEFAULT_EMOJIS.items():
+        existing = get_setting(f"emoji_{slot}", "").strip()
+        if not existing or existing.isdigit():
+            set_setting(f"emoji_{slot}", emoji_char)
     
-    # Force update UI texts
-    set_setting("ui_start_menu", UI_TEXTS['start_menu'])
-    set_setting("ui_add_balance_menu", UI_TEXTS['add_balance_menu'])
-    set_setting("ui_vip_menu", UI_TEXTS['vip_menu'])
-    logger.info("UI texts and emojis updated with new placeholders and IDs.")
+    # Insert default UI texts ONLY if not already set
+    for text_key, default_val in UI_TEXTS.items():
+        if not get_setting(f"ui_{text_key}", ""):
+            set_setting(f"ui_{text_key}", default_val)
+    logger.info("Database settings, UI texts, and emoji mappings verified.")
     
     # Fix any corrupted price columns (one-time cleanup)
     conn = sqlite3.connect('Cuibcc.db')
@@ -705,13 +783,9 @@ class AdminStates(StatesGroup):
 # 7. KEYBOARDS
 # ==============================================================================
 def get_category_emoji(category: str) -> str:
-    # First, check if a specific emoji ID is set by admin for this exact category name
-    custom_cat_emoji_id = get_setting(f"cat_emoji_{category}", "")
-    if custom_cat_emoji_id.isdigit():
-        return custom_cat_emoji_id # Return the custom emoji ID if set and valid
-
-    # If no custom emoji, fall back to the generic slot name defined in DEFAULT_EMOJIS
-    # and then check global emoji settings (emoji_{slot}) or the hardcoded default.
+    stored = get_setting(f"cat_emoji_{category}", "").strip()
+    if stored:
+        return stored
     slot_map = {
         "ANDROID NON ROOT PANEL": "category_android_non_root",
         "ANDROID ROOT PANEL": "category_android_root",
@@ -719,16 +793,29 @@ def get_category_emoji(category: str) -> str:
     }
     slot = slot_map.get(category)
     if slot:
-        return get_emoji_icon(slot) # get_emoji_icon handles fallback from settings 'emoji_{slot}' to DEFAULT_EMOJIS
-    return "" # No specific emoji or fallback found
+        stored_slot = get_setting(f"emoji_{slot}", "").strip()
+        if stored_slot:
+            return stored_slot
+        return DEFAULT_EMOJIS.get(slot, "")
+    return ""
 
 def get_panel_emoji(panel_name: str) -> str:
-    # Check if a specific emoji is set for this exact panel name
-    stored = get_setting(f"panel_emoji_{panel_name}", "")
-    if stored and stored.isdigit():
+    stored = get_setting(f"panel_emoji_{panel_name}", "").strip()
+    if stored:
         return stored
-    # Fallback to the generic 'product_store' emoji if no specific panel emoji
-    return get_emoji_icon("product_store")
+    stored_store = get_setting("emoji_product_store", "").strip()
+    if stored_store:
+        return stored_store
+    return DEFAULT_EMOJIS.get("product_store", "")
+
+def make_emoji_button(text: str, callback_data: str, emoji_val: Optional[str] = None, style: str = "primary") -> InlineKeyboardButton:
+    """Creates an InlineKeyboardButton displaying the emoji directly in the button text safely."""
+    clean_text = text.strip()
+    if emoji_val:
+        e_str = str(emoji_val).strip()
+        if not e_str.isdigit() and e_str and not clean_text.startswith(e_str):
+            clean_text = f"{e_str} {clean_text}"
+    return InlineKeyboardButton(text=clean_text, callback_data=callback_data)
 
 def contact_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -751,60 +838,53 @@ def main_menu_kb(user_id: Optional[int] = None) -> InlineKeyboardMarkup:
 
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     
+    p_store_emoji = get_emoji("product_store")
+    profile_emoji = get_emoji("profile")
+    balance_emoji = get_emoji("add_balance")
+    history_emoji = get_emoji("history")
+    tutorial_emoji = get_emoji("tutorial")
+    support_emoji = get_emoji("support")
+    reseller_emoji = get_emoji("reseller")
+    vip_emoji = get_emoji("vip")
+
     kb.inline_keyboard.append([
         InlineKeyboardButton(
-            text="Product Store", callback_data="menu_shop",
-            icon_custom_emoji_id=get_emoji_icon("product_store"),
-            style="danger"
+            text=f"{p_store_emoji} Product Store", callback_data="menu_shop"
         )
     ])
     kb.inline_keyboard.append([
         InlineKeyboardButton(
-            text="My Profile", callback_data="menu_profile",
-            icon_custom_emoji_id=get_emoji_icon("profile"),
-            style="primary"
+            text=f"{profile_emoji} My Profile", callback_data="menu_profile"
         ),
         InlineKeyboardButton(
-            text="Add Balance", callback_data="menu_add_balance",
-            icon_custom_emoji_id=get_emoji_icon("add_balance"),
-            style="primary"
+            text=f"{balance_emoji} Add Balance", callback_data="menu_add_balance"
         )
     ])
     kb.inline_keyboard.append([
         InlineKeyboardButton(
-            text="All History", callback_data="menu_orders",
-            icon_custom_emoji_id=get_emoji_icon("history"),
-            style="primary"
+            text=f"{history_emoji} All History", callback_data="menu_orders"
         ),
         InlineKeyboardButton(
-            text="🎁 Refer & Earn", callback_data="menu_referral",
-            style="success"
+            text="🎁 Refer & Earn", callback_data="menu_referral"
         )
     ])
     kb.inline_keyboard.append([
         InlineKeyboardButton(
-            text="Tutorials", callback_data="menu_how_to",
-            icon_custom_emoji_id=get_emoji_icon("tutorial"),
-            style="success"
+            text=f"{tutorial_emoji} Tutorials", callback_data="menu_how_to"
         ),
         InlineKeyboardButton(
-            text="Support", callback_data="menu_support",
-            icon_custom_emoji_id=get_emoji_icon("support"),
-            style="danger"
+            text=f"{support_emoji} Support", callback_data="menu_support"
         )
     ])
     
     extras_row = []
     if sys_status == 'ON' or is_reseller:
         extras_row.append(InlineKeyboardButton(
-            text="Reseller Panel", callback_data="menu_reseller_dash",
-            icon_custom_emoji_id=get_emoji_icon("reseller"),
-            style="primary"
+            text=f"{reseller_emoji} Reseller Panel", callback_data="menu_reseller_dash"
         ))
     if vip_system == 'ON':
         extras_row.append(InlineKeyboardButton(
-            text="VIP Club", callback_data="menu_vip_dash",
-            style="danger"
+            text=f"{vip_emoji} VIP Club", callback_data="menu_vip_dash"
         ))
     if extras_row:
         kb.inline_keyboard.append(extras_row)
@@ -812,12 +892,11 @@ def main_menu_kb(user_id: Optional[int] = None) -> InlineKeyboardMarkup:
     return kb
 
 def back_kb(callback: str = "back_main") -> InlineKeyboardMarkup:
+    b_emoji = get_emoji("back")
     return InlineKeyboardMarkup(
         inline_keyboard=[[
             InlineKeyboardButton(
-                text="BACK", callback_data=callback,
-                icon_custom_emoji_id=get_emoji_icon("back"),
-                style="danger"
+                text=f"{b_emoji} BACK", callback_data=callback
             )
         ]]
     )
@@ -886,11 +965,10 @@ def admin_kb() -> InlineKeyboardMarkup:
     return kb
 
 def admin_back_kb() -> InlineKeyboardMarkup:
+    b_emoji = get_emoji("back")
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text="Back to Admin", callback_data="admin_panel_back",
-            icon_custom_emoji_id=get_emoji_icon("back"),
-            style="danger"
+            text=f"{b_emoji} Back to Admin", callback_data="admin_panel_back"
         )
     ]])
 
@@ -986,21 +1064,27 @@ async def generate_fampay_qr(user_id: int, amount: float, upi_id: str = None) ->
         return {"status": "error", "message": str(e)}
 
 async def verify_fampay_payment(order_id: str) -> Dict[str, Any]:
-    """Verify payment using the Admin-configured FamGateway / FamPay API with multi-endpoint fallback."""
+    """Verify payment using the configured Payment Gateway with multi-endpoint fallback."""
     gateway_token = (get_setting("payment_gateway_token", "") or "").strip()
     if not gateway_token:
         gateway_token = (get_setting("fampay_api_key", FAMPAY_API_KEY) or "").strip()
-    gateway_url = (get_setting("payment_gateway_url", PAYMENT_GATEWAY_URL) or "").strip()
+    if not gateway_token:
+        gateway_token = PAYMENT_GATEWAY_TOKEN
 
-    # Try 1: FamGateway API (if token provided)
+    gateway_url = (get_setting("payment_gateway_url", PAYMENT_GATEWAY_URL) or "").strip()
+    if not gateway_url:
+        gateway_url = "https://payment-gateway-87gk.onrender.com/api/create-order"
+
+    # Try Payment Gateway API verification
     if gateway_token and gateway_token != "YOUR_FAMPAY_API_KEY":
         try:
-            from urllib.parse import urlsplit, urlunsplit
+            from urllib.parse import urlsplit
             parts = urlsplit(gateway_url.rstrip("/"))
-            verify_host = f"{parts.scheme}://{parts.netloc}" if (parts.scheme and parts.netloc) else "https://famgateway.in"
+            verify_host = f"{parts.scheme}://{parts.netloc}" if (parts.scheme and parts.netloc) else "https://payment-gateway-87gk.onrender.com"
             
-            # Query with multiple auth parameter conventions (famgateway.in requires ?api_key=...)
+            # Query with primary Render gateway /api/order-status/{order_id} and fallback routes
             verify_endpoints = [
+                f"{verify_host}/api/order-status/{urllib.parse.quote(order_id)}",
                 f"{verify_host}/api/verify-order.php?order_id={urllib.parse.quote(order_id)}&api_key={urllib.parse.quote(gateway_token)}",
                 f"{verify_host}/api/verify-order?order_id={urllib.parse.quote(order_id)}&api_key={urllib.parse.quote(gateway_token)}",
                 f"{verify_host}/api/verify-order.php?order_id={urllib.parse.quote(order_id)}&token={urllib.parse.quote(gateway_token)}",
@@ -1009,18 +1093,35 @@ async def verify_fampay_payment(order_id: str) -> Dict[str, Any]:
             
             headers = {
                 "Accept": "application/json",
-                "Authorization": f"Bearer {gateway_token}",
                 "X-Api-Key": gateway_token,
+                "Authorization": f"Bearer {gateway_token}",
             }
             
             for endpoint in verify_endpoints:
                 try:
-                    status, body = await http_request("GET", endpoint, headers=headers, timeout=10)
+                    status, body = await http_request("GET", endpoint, headers=headers, timeout=12)
                     if 200 <= status < 300:
                         raw = body.decode("utf-8", errors="replace")
                         result = json.loads(raw)
-                        if isinstance(result, dict) and result.get("status") in ("success", "ok", True):
-                            return result
+                        if isinstance(result, dict):
+                            order_status = str(result.get("status", "")).upper()
+                            if order_status in ("SUCCESS", "PAID", "COMPLETED", "DONE"):
+                                return {
+                                    "status": "success",
+                                    "data": {
+                                        "transaction_id": result.get("transaction_ref") or result.get("order_id") or order_id,
+                                        "utr": result.get("transaction_ref") or result.get("utr") or "CONFIRMED",
+                                        "sender_name": result.get("customer_name") or "UPI Sender",
+                                        "amount": result.get("amount"),
+                                        "payment_time_ist": result.get("created_at") or datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+                                    }
+                                }
+                            elif order_status in ("PENDING", "WAITING"):
+                                return {"status": "pending", "message": "Payment is pending confirmation."}
+                            elif order_status in ("EXPIRED", "FAILED", "CANCELLED"):
+                                return {"status": "expired", "message": f"Payment {order_status.lower()}."}
+                            elif result.get("status") in ("success", "ok", True) or (result.get("success") is True and "status" not in result):
+                                return result
                 except Exception:
                     pass
         except Exception as e:
@@ -1670,32 +1771,44 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
     if inr_amount < 1:
         return await message_obj.edit_text("❌ <b>Minimum deposit is ₹1.</b>", reply_markup=back_kb("gateway_inr"), parse_mode="HTML")
     gateway_url = (get_setting("payment_gateway_url", PAYMENT_GATEWAY_URL) or "").strip()
+    if not gateway_url:
+        gateway_url = "https://payment-gateway-87gk.onrender.com/api/create-order"
     gateway_token = (get_setting("payment_gateway_token", "") or "").strip()
-    # Backward-compatible: use the existing FamPay API key field if gateway token is empty.
     if not gateway_token:
         gateway_token = (get_setting("fampay_api_key", "") or "").strip()
-    gateway_redirect = (get_setting("payment_redirect_url", "") or "").strip()
+    if not gateway_token:
+        gateway_token = PAYMENT_GATEWAY_TOKEN
+    gateway_redirect = (get_setting("payment_redirect_url", PAYMENT_REDIRECT_URL) or "").strip()
+    if not gateway_redirect:
+        gateway_redirect = "https://yoursite.com/payment-success"
 
-    # New Admin-configured FamGateway flow.
+    # Payment Gateway flow
     if gateway_token:
         try:
-            # FamGateway's canonical endpoint is /api/create-order.
-            # If an older /create-order.php URL was saved, normalize it.
             gateway_url = gateway_url.rstrip("/")
             if gateway_url.endswith("/api/create-order.php"):
                 gateway_url = gateway_url[:-5]
 
-            payload = {"amount": round(float(inr_amount), 2)}
-            if gateway_redirect:
-                payload["redirect_url"] = gateway_redirect
-            payload["customer_name"] = str(user_id)
-            payload["custom_id"] = f"TG_{user_id}_{int(time.time())}"
+            user_row = db_query("SELECT first_name, username FROM users WHERE user_id=?", (user_id,), fetchone=True)
+            c_name = "Customer"
+            if user_row:
+                c_name = (user_row[0] or user_row[1] or f"User_{user_id}").strip()
+            else:
+                c_name = f"User_{user_id}"
+            c_email = f"user_{user_id}@t.me"
+
+            payload = {
+                "amount": round(float(inr_amount), 2),
+                "customer_name": c_name,
+                "customer_email": c_email,
+                "redirect_url": gateway_redirect
+            }
 
             headers = {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "Authorization": f"Bearer {gateway_token}",
                 "X-Api-Key": gateway_token,
+                "Authorization": f"Bearer {gateway_token}",
             }
 
             status, body = await http_request(
@@ -1709,49 +1822,54 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
                 result = {"status": "error", "message": raw[:500] or f"HTTP {status}"}
 
             if status < 200 or status >= 300:
-                logger.warning(f"FamGateway create-order HTTP {status}: {raw[:500]}, falling back to UPI QR flow.")
+                logger.warning(f"Payment gateway create-order HTTP {status}: {raw[:500]}, falling back to UPI QR flow.")
                 raise RuntimeError(f"Gateway HTTP {status}")
 
-            if not isinstance(result, dict) or result.get("status") not in ("success", "ok", True):
-                logger.warning(f"FamGateway create-order rejected: {result}, falling back to UPI QR flow.")
+            is_success = (
+                isinstance(result, dict) and (
+                    result.get("success") is True or 
+                    result.get("status") in ("success", "ok", True)
+                )
+            )
+            if not is_success:
+                logger.warning(f"Payment gateway create-order rejected: {result}, falling back to UPI QR flow.")
                 raise RuntimeError("Gateway rejected order creation")
 
             data = result.get("data") if isinstance(result.get("data"), dict) else result
             order_id = str(data.get("order_id") or data.get("id") or f"FG{user_id}{int(time.time())}")
-            qr_url = data.get("qr_url") or data.get("qr_image") or data.get("qr")
+            qr_data_url = data.get("qr_data_url") or ""
+            qr_url = data.get("qr_url") or data.get("qr_image") or data.get("qr") or ""
             checkout_url = data.get("checkout_url") or data.get("payment_url") or data.get("checkout")
-            upi_intent = data.get("upi_intent") or data.get("upi_link")
-            upi_id = data.get("upi_id") or ""
-            expires_at_str = data.get("expires_at_ist") or data.get("expires_at")
-            created_at = data.get("created_at_ist") or data.get("created_at") or datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+            if isinstance(checkout_url, str) and checkout_url.startswith("http://payment-gateway-87gk.onrender.com"):
+                checkout_url = checkout_url.replace("http://", "https://", 1)
+            upi_intent = data.get("upi_uri") or data.get("upi_intent") or data.get("upi_link") or ""
+            upi_id = data.get("merchant_upi_id") or data.get("upi_id") or ""
+            expires_at_str = data.get("expires_at_ist") or data.get("expires_at") or (datetime.now() + timedelta(minutes=10)).strftime("%d-%m-%Y %H:%M:%S")
 
-            # A hosted checkout/QR URL is required to give the customer a payment action.
-            payment_url = checkout_url or qr_url
-            if not payment_url:
-                logger.warning(f"FamGateway response has no checkout/QR URL: {result}, falling back to UPI QR flow.")
+            payment_url = checkout_url or qr_url or qr_data_url or upi_intent
+            if not payment_url and not upi_intent:
+                logger.warning(f"Gateway response has no checkout or QR URL: {result}, falling back to UPI QR flow.")
                 raise RuntimeError("No payment URL in gateway response")
 
             try:
-                expiry_time = datetime.strptime(expires_at_str, "%d-%m-%Y %H:%M:%S") if expires_at_str and "-" in str(expires_at_str) else datetime.now() + timedelta(minutes=5)
+                expiry_time = datetime.strptime(expires_at_str, "%d-%m-%Y %H:%M:%S") if expires_at_str and "-" in str(expires_at_str) else datetime.now() + timedelta(minutes=10)
                 expires_timestamp = int(expiry_time.timestamp())
             except Exception:
-                expires_timestamp = int(time.time() + 300)
+                expires_timestamp = int(time.time() + 600)
 
             db_query(
                 "INSERT OR REPLACE INTO transactions (order_id, user_id, amount_inr, status, timestamp, qr_url, upi_id, expires_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
-                (order_id, user_id, inr_amount, int(time.time()), payment_url, upi_id, expires_timestamp)
+                (order_id, user_id, inr_amount, int(time.time()), str(payment_url)[:500], upi_id, expires_timestamp)
             )
 
-            # Telegram does not allow UPI deep-links (upi://) as inline-button URLs.
-            # Display the QR image directly inside the bot instead.
             buttons = []
             buttons.append([InlineKeyboardButton(text="🔄 Verify Payment", callback_data=f"verify_{order_id}", style="primary")])
             hosted_url = checkout_url if isinstance(checkout_url, str) and checkout_url.startswith(("https://", "http://")) else None
             qr_open_url = qr_url if isinstance(qr_url, str) and qr_url.startswith(("https://", "http://")) else None
             if hosted_url:
-                buttons.append([InlineKeyboardButton(text="💳 Open Payment", url=hosted_url, style="success")])
+                buttons.append([InlineKeyboardButton(text="💳 Pay Now / Checkout", url=hosted_url, style="success")])
             elif qr_open_url:
-                buttons.append([InlineKeyboardButton(text="🖼 Open QR", url=qr_open_url, style="success")])
+                buttons.append([InlineKeyboardButton(text="🖼 Open QR Code", url=qr_open_url, style="success")])
             buttons.append([InlineKeyboardButton(text="Cancel", callback_data="menu_add_balance", style="danger")])
             kb = InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -1759,52 +1877,65 @@ async def generate_fampay_order(user_id: int, inr_amount: float, message_obj: Me
                 "🧾 <b>PAYMENT ORDER CREATED</b>\n\n"
                 f"💵 <b>Amount:</b> {fmt_curr(inr_amount)}\n"
                 f"🆔 <b>Order ID:</b> <code>{html.escape(order_id)}</code>\n"
-                f"🏦 <b>UPI ID:</b> <code>{html.escape(str(upi_id or 'Gateway checkout'))}</code>\n"
-                f"⏳ <b>Expires:</b> {html.escape(str(expires_at_str or '5 minutes'))}\n\n"
-                "📱 <b>Scan the QR code below</b> and pay the exact amount.\n"
+                f"🏦 <b>UPI ID:</b> <code>{html.escape(str(upi_id or 'Gateway Checkout'))}</code>\n"
+                f"⏳ <b>Expires:</b> {html.escape(str(expires_at_str or '10 minutes'))}\n\n"
+                "📱 <b>Scan the QR code below</b> or tap <b>Pay Now</b> to pay the exact amount.\n"
                 "After payment, tap <b>Verify Payment</b>."
             )
 
-            log_activity(user_id, "GENERATE_INVOICE_FAMGATEWAY", f"Amount: {inr_amount}, Order ID: {order_id}")
+            log_activity(user_id, "GENERATE_INVOICE_GATEWAY", f"Amount: {inr_amount}, Order ID: {order_id}")
 
-            # Send the gateway-generated QR image directly into this Telegram chat.
-            # If downloading the gateway QR fails, fall back to the checkout URL button.
-            if qr_url:
+            qr_bytes = None
+            if qr_data_url and isinstance(qr_data_url, str) and "base64," in qr_data_url:
                 try:
-                    # Telegram can fetch the public FamGateway QR image directly.
+                    import base64
+                    b64_part = qr_data_url.split("base64,", 1)[1]
+                    qr_bytes = base64.b64decode(b64_part)
+                except Exception as b64_err:
+                    logger.warning(f"Error decoding qr_data_url base64: {b64_err}")
+
+            if not qr_bytes and qr_url and isinstance(qr_url, str) and qr_url.startswith(("http://", "https://")):
+                try:
+                    qr_status, downloaded = await http_request("GET", qr_url, timeout=12)
+                    if 200 <= qr_status < 300 and downloaded:
+                        qr_bytes = downloaded
+                except Exception as dl_err:
+                    logger.warning(f"Error downloading qr_url: {dl_err}")
+
+            if not qr_bytes and upi_intent:
+                try:
+                    import qrcode
+                    import io
+                    qr_img = qrcode.make(upi_intent)
+                    buf = io.BytesIO()
+                    qr_img.save(buf, format="PNG")
+                    qr_bytes = buf.getvalue()
+                except Exception as qrc_err:
+                    logger.warning(f"Error generating QR from upi_intent: {qrc_err}")
+
+            if qr_bytes:
+                try:
+                    qr_file = BufferedInputFile(qr_bytes, filename=f"payment_{order_id}.png")
                     try:
                         await message_obj.delete()
                     except Exception:
                         pass
                     await bot.send_photo(
                         chat_id=user_id,
-                        photo=qr_url,
+                        photo=qr_file,
                         caption=text,
                         reply_markup=kb,
                         parse_mode="HTML"
                     )
                     return
                 except Exception as direct_qr_error:
-                    logger.warning(f"Direct QR send failed, trying download fallback: {direct_qr_error}")
-                    try:
-                        qr_status, qr_bytes = await http_request("GET", qr_url, timeout=15)
-                        if 200 <= qr_status < 300 and qr_bytes:
-                            qr_file = BufferedInputFile(qr_bytes, filename=f"payment_{order_id}.png")
-                            try:
-                                await message_obj.delete()
-                            except Exception:
-                                pass
-                            await bot.send_photo(chat_id=user_id, photo=qr_file, caption=text, reply_markup=kb, parse_mode="HTML")
-                            return
-                        logger.error(f"QR download failed: HTTP {qr_status}")
-                    except Exception as qr_error:
-                        logger.exception(f"Gateway QR image download failed: {qr_error}")
+                    logger.warning(f"Direct QR send failed: {direct_qr_error}")
 
-            # Final fallback: keep the payment order message if the QR image cannot be downloaded.
+            # Final fallback: edit text message
             await message_obj.edit_text(text, reply_markup=kb, parse_mode="HTML")
             return
         except Exception as e:
-            logger.warning(f"FamGateway create-order failed ({e}), falling back to direct UPI QR payment flow.")
+            logger.warning(f"Payment gateway create-order failed ({e}), falling back to direct UPI QR payment flow.")
 
     # ==============================================================================
     # AUTOMATIC FAIL-SAFE FALLBACK: DIRECT UPI QR PAYMENT GENERATION
@@ -2846,7 +2977,7 @@ async def exec_warn_user(m: Message, state: FSMContext):
 # ==============================================================================
 @dp.callback_query(F.data == "admin_view_stats")
 async def admin_dashboard_stats(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     t_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
     t_resellers = db_query("SELECT COUNT(*) FROM users WHERE is_reseller=1", fetchone=True)[0]
     t_vip = db_query("SELECT COUNT(*) FROM users WHERE is_vip=1", fetchone=True)[0]
@@ -2863,7 +2994,7 @@ async def admin_dashboard_stats(call: CallbackQuery):
 # ==============================================================================
 @dp.callback_query(F.data == "admin_add_prod")
 async def add_prod_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     for cat in FIXED_CATEGORIES:
         emoji_id = get_category_emoji(cat)
@@ -2873,7 +3004,7 @@ async def add_prod_start(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("addprod_cat_"))
 async def add_prod_category_selected(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     category = call.data.split("addprod_cat_", 1)[1]
     await state.update_data(cat=category)
     
@@ -3340,7 +3471,7 @@ async def admin_delete_product(call: CallbackQuery):
 # ==============================================================================
 @dp.callback_query(F.data == "admin_view_tickets")
 async def admin_view_tickets(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     tickets = db_query("SELECT id, user_id, message, created_at FROM tickets WHERE status='Open' LIMIT 1", fetchall=True)
     if not tickets: return await call.answer("✅ Zero pending issues. Grid is clean!", show_alert=True)
     t = tickets[0]
@@ -3379,7 +3510,7 @@ async def send_ticket_reply(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_broadcast_btn")
 async def admin_broadcast_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("📢 <b>Mass Broadcast Protocol</b>\n\nSend the rich message payload you wish to transmit globally across the grid:", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.broadcast_msg)
 
@@ -3399,7 +3530,7 @@ async def admin_broadcast_send(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_create_coupon")
 async def admin_create_coupon_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("🎟 Enter a highly secure alphanumeric sequence for the Promo Code:", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.add_coupon_code)
 
@@ -3432,7 +3563,7 @@ async def admin_coupon_uses(m: Message, state: FSMContext):
 # ==============================================================================
 @dp.callback_query(F.data == "admin_reseller_menu")
 async def admin_reseller_menu(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     status_check = db_query("SELECT value FROM settings WHERE key='reseller_system_status'", fetchone=True)
     sys_status = status_check[0] if status_check else "ON"
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -3445,7 +3576,7 @@ async def admin_reseller_menu(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_toggle_reseller_sys")
 async def toggle_reseller_sys(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     res = db_query("SELECT value FROM settings WHERE key='reseller_system_status'", fetchone=True)
     current = res[0] if res else 'ON'
     new_status = 'OFF' if current == 'ON' else 'ON'
@@ -3488,7 +3619,7 @@ async def reseller_view(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_toggle_bot")
 async def toggle_bot(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     res = db_query("SELECT value FROM settings WHERE key='bot_status'", fetchone=True)
     current = res[0] if res else 'ON'
     new_status = 'OFF' if current == 'ON' else 'ON'
@@ -3498,7 +3629,7 @@ async def toggle_bot(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_set_video")
 async def admin_set_video_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("📹 Input direct streaming / YouTube Link for Tutorial system:\n<i>(Or type 'None' to clear registry):</i>", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_howto_video)
 
@@ -3510,47 +3641,165 @@ async def exec_set_video(m: Message, state: FSMContext):
     await state.clear()
 
 
+# ==============================================================================
+# 22. ADMIN EMOJI EDITING (SLOTS, CATEGORIES & PANELS)
+# ==============================================================================
+EMOJIS_PER_PAGE = 7
+
 @dp.callback_query(F.data == "admin_edit_emojis")
+@dp.callback_query(F.data.startswith("admin_edit_emojis_page_"))
 async def admin_edit_emojis(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
-    rows = db_query("SELECT key, value FROM settings WHERE key LIKE 'emoji_%' ORDER BY key", fetchall=True)
+    if not is_admin_user(call.from_user.id): return
+    await call.answer()
+    
+    page = 0
+    if call.data.startswith("admin_edit_emojis_page_"):
+        try:
+            page = int(call.data.split("admin_edit_emojis_page_", 1)[1])
+        except (ValueError, IndexError):
+            page = 0
+            
+    all_slots = list(DEFAULT_EMOJIS.keys())
+    total_slots = len(all_slots)
+    total_pages = max(1, (total_slots + EMOJIS_PER_PAGE - 1) // EMOJIS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    
+    start_idx = page * EMOJIS_PER_PAGE
+    end_idx = min(start_idx + EMOJIS_PER_PAGE, total_slots)
+    page_slots = all_slots[start_idx:end_idx]
+    
     kb = InlineKeyboardMarkup(inline_keyboard=[])
-    for row in rows:
-        key = row[0]
-        slot = key.replace("emoji_", "")
-        current_id = row[1] if row[1] else "Not set"
-        kb.inline_keyboard.append([InlineKeyboardButton(text=f"{slot} (ID: {current_id})", callback_data=f"edit_emoji_{slot}", style="primary")])
-    kb.inline_keyboard.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
-    await call.message.edit_text("🎨 <b>Edit All Emojis</b>\nChoose an emoji slot to change its ID:", reply_markup=kb, parse_mode='HTML')
+    
+    for slot in page_slots:
+        friendly = EMOJI_SLOT_INFO.get(slot, slot.replace("_", " ").title())
+        stored_val = get_setting(f"emoji_{slot}", "").strip()
+        default_val = DEFAULT_EMOJIS.get(slot, "")
+        is_custom = bool(stored_val and stored_val != default_val and not stored_val.isdigit())
+        status_dot = "🟢" if is_custom else "⚪"
+        curr_emoji = get_emoji(slot)
+        btn_label = f"{status_dot} {curr_emoji} {friendly}"
+        
+        kb.inline_keyboard.append([InlineKeyboardButton(text=btn_label, callback_data=f"edit_emoji_{slot}")])
+        
+    # Pagination Row
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"admin_edit_emojis_page_{page - 1}"))
+    nav_buttons.append(InlineKeyboardButton(text=f"📄 {page + 1}/{total_pages}", callback_data="admin_noop"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"admin_edit_emojis_page_{page + 1}"))
+    kb.inline_keyboard.append(nav_buttons)
+    
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="⬅️ Back to Admin", callback_data="admin_panel_back")
+    ])
+    
+    header_text = (
+        "🎨 <b><u>ADMIN EMOJI STUDIO</u></b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "Select any emoji slot below to customize its icon.\n"
+        "🟢 = Custom Saved | ⚪ = Default Preset\n\n"
+        "<i>All changes take effect immediately across all menus & broadcasts!</i>"
+    )
+    try:
+        await call.message.edit_text(header_text, reply_markup=kb, parse_mode='HTML')
+    except Exception:
+        await call.message.answer(header_text, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data == "admin_noop")
+async def admin_noop(call: CallbackQuery):
+    await call.answer()
 
 @dp.callback_query(F.data.startswith("edit_emoji_"))
 async def admin_edit_emoji_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
+    await call.answer()
     slot = call.data.split("edit_emoji_", 1)[1]
     await state.update_data(emoji_slot=slot)
-    current = get_setting(f"emoji_{slot}", "Not set")
-    await call.message.edit_text(f"✏️ Enter new emoji ID for <b>{slot}</b>:\nCurrent: {current}\n(Leave empty to reset to default)", reply_markup=admin_back_kb(), parse_mode='HTML')
+    
+    stored = get_setting(f"emoji_{slot}", "").strip()
+    default_val = DEFAULT_EMOJIS.get(slot, "✨")
+    friendly = EMOJI_SLOT_INFO.get(slot, slot.replace("_", " ").title())
+    preview_tag = get_emoji(slot)
+    
+    status_text = f"Custom: <b>{stored}</b>" if (stored and stored != default_val and not stored.isdigit()) else f"Default: <b>{default_val}</b>"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Reset to Default Preset", callback_data=f"reset_emoji_{slot}")],
+        [InlineKeyboardButton(text="🔙 Back to Emoji Studio", callback_data="admin_edit_emojis_page_0")],
+        [InlineKeyboardButton(text="🏠 Admin Panel", callback_data="admin_panel_back")]
+    ])
+    
+    prompt = (
+        f"🎨 <b>Customize Emoji: {friendly}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"<b>Slot:</b> <code>{slot}</code>\n"
+        f"<b>Current Active Emoji:</b> {preview_tag} ({status_text})\n\n"
+        f"👉 <b>How to set a new emoji:</b>\n"
+        f"1️⃣ <b>Standard Emoji:</b> Send any emoji in chat (e.g. 🛒, 💎, 👑, 🔥, ⚡, 📦, 🤖, 📱, 💻, 🎯, 🚀).\n"
+        f"2️⃣ <b>Custom Emoji:</b> Pick and send ANY custom emoji from your Telegram emoji panel.\n"
+        f"3️⃣ <b>Reset:</b> Send <code>reset</code> or tap the Reset button below."
+    )
     await state.set_state(AdminStates.wait_for_emoji_slot)
+    try:
+        await call.message.edit_text(prompt, reply_markup=kb, parse_mode='HTML')
+    except Exception:
+        await call.message.answer(prompt, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("reset_emoji_"))
+async def reset_emoji_callback(call: CallbackQuery, state: FSMContext):
+    if not is_admin_user(call.from_user.id): return
+    await state.clear()
+    slot = call.data.split("reset_emoji_", 1)[1]
+    db_query("DELETE FROM settings WHERE key=?", (f"emoji_{slot}",))
+    friendly = EMOJI_SLOT_INFO.get(slot, slot.replace("_", " ").title())
+    await call.answer(f"✅ Reset emoji for {friendly} to default!", show_alert=True)
+    await admin_edit_emojis(call)
 
 @dp.message(AdminStates.wait_for_emoji_slot)
 async def save_emoji_slot(m: Message, state: FSMContext):
     data = await state.get_data()
-    slot = data['emoji_slot']
-    new_id = m.text.strip()
-    if new_id == "":
+    slot = data.get('emoji_slot')
+    if not slot:
+        await state.clear()
+        return
+        
+    val, preview = extract_emoji_from_message(m)
+    friendly = EMOJI_SLOT_INFO.get(slot, slot.replace("_", " ").title())
+    
+    if not val and val != "":
+        await m.answer(
+            f"❌ Could not detect an emoji in your message.\n\n"
+            f"Please send any emoji (e.g. 🛒, 💎, 👑, 🔥, ⚡) or send <code>reset</code>.",
+            reply_markup=admin_back_kb(),
+            parse_mode='HTML'
+        )
+        return
+        
+    if val == "" or val.lower() in ["reset", "default", "none", "clear", "/reset"]:
         db_query("DELETE FROM settings WHERE key=?", (f"emoji_{slot}",))
-        await m.answer(f"✅ Reset emoji for '{slot}' to default.", reply_markup=admin_kb(), parse_mode='HTML')
+        default_val = DEFAULT_EMOJIS.get(slot, "✨")
+        await m.answer(
+            f"✅ <b>Reset emoji for '{friendly}' to default!</b>\n\n"
+            f"Active Emoji: {default_val}",
+            reply_markup=admin_kb(),
+            parse_mode='HTML'
+        )
     else:
-        if not new_id.isdigit():
-            await m.answer("❌ Invalid ID! Must be numeric.", reply_markup=admin_kb(), parse_mode='HTML')
-            return
-        set_setting(f"emoji_{slot}", new_id)
-        await m.answer(f"✅ Emoji for '{slot}' updated to ID {new_id}.", reply_markup=admin_kb(), parse_mode='HTML')
+        set_setting(f"emoji_{slot}", val)
+        await m.answer(
+            f"✅ <b>Emoji for '{friendly}' successfully updated!</b>\n\n"
+            f"New Emoji: {val}\n"
+            f"<i>This emoji is now active across all menus and buttons!</i>",
+            reply_markup=admin_kb(),
+            parse_mode='HTML'
+        )
+        
     await state.clear()
 
 @dp.callback_query(F.data == "admin_edit_ui_menu")
 async def admin_edit_ui_menu(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Edit Start Menu Text", callback_data="edit_ui_start", style="primary")],
         [InlineKeyboardButton(text="Edit VIP Menu Text", callback_data="edit_ui_vip", style="primary")],
@@ -3561,7 +3810,7 @@ async def admin_edit_ui_menu(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("edit_ui_"))
 async def admin_edit_ui_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     ui_key = call.data.split("_")[2]
     await state.update_data(ui_key=ui_key)
     current_text = get_ui_text(ui_key)
@@ -3579,7 +3828,7 @@ async def admin_save_ui_text(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_edit_reseller_price")
 async def admin_edit_reseller_price_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     prods = db_query("SELECT id, name, category, panel_name, reseller_price FROM products ORDER BY category, panel_name", fetchall=True)
     if not prods: return await call.message.edit_text("No products to edit.", reply_markup=admin_back_kb(), parse_mode='HTML')
     kb = InlineKeyboardMarkup(inline_keyboard=[])
@@ -3592,7 +3841,7 @@ async def admin_edit_reseller_price_start(call: CallbackQuery, state: FSMContext
 
 @dp.callback_query(F.data.startswith("edit_reseller_"))
 async def admin_edit_reseller_price_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     prod_id = int(call.data.split("_")[2])
     await state.update_data(edit_reseller_prod_id=prod_id)
     await call.message.edit_text("💰 Enter the new <b>Reseller Price</b> in Rupees (₹) for this product:", reply_markup=admin_back_kb(), parse_mode='HTML')
@@ -3611,7 +3860,7 @@ async def admin_save_reseller_price(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_set_reseller_fee")
 async def admin_set_reseller_fee(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("💰 Enter the new <b>Reseller Setup Fee</b> in Rupees (₹):\nCurrent: " + get_setting("reseller_setup_fee", "200.0"), reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_reseller_setup_fee)
 
@@ -3626,7 +3875,7 @@ async def admin_save_reseller_fee(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_set_reseller_min")
 async def admin_set_reseller_min(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("💳 Enter the new <b>Minimum Balance</b> required to become reseller (₹):\nCurrent: " + get_setting("reseller_min_balance", "500.0"), reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_reseller_min_balance)
 
@@ -3641,7 +3890,7 @@ async def admin_save_reseller_min(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_set_support_links")
 async def admin_set_support_links(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📞 Set Telegram Link", callback_data="admin_set_telegram", style="primary")],
         [InlineKeyboardButton(text="📱 Set WhatsApp Link", callback_data="admin_set_whatsapp", style="primary")],
@@ -3651,7 +3900,7 @@ async def admin_set_support_links(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_set_telegram")
 async def admin_set_telegram(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("✈️ Enter the Telegram contact URL (e.g., https://t.me/YourSupport):", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_support_telegram)
 
@@ -3664,7 +3913,7 @@ async def save_telegram_link(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_set_whatsapp")
 async def admin_set_whatsapp(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("📱 Enter the WhatsApp contact URL (e.g., https://wa.me/1234567890):", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_support_whatsapp)
 
@@ -3676,44 +3925,87 @@ async def save_whatsapp_link(m: Message, state: FSMContext):
     await state.clear()
 
 @dp.callback_query(F.data == "admin_set_category_emojis")
-async def admin_set_category_emojis(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+async def admin_set_category_emojis(call: CallbackQuery, state: FSMContext = None):
+    if not is_admin_user(call.from_user.id): return
+    await call.answer()
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     for cat in FIXED_CATEGORIES:
-        # Fetch the specific category emoji
-        current = get_setting(f"cat_emoji_{cat}", "Not set")
-        kb.inline_keyboard.append([InlineKeyboardButton(text=f"{cat} (ID: {current})", callback_data=f"set_cat_emoji_{cat}", style="primary")])
-    kb.inline_keyboard.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
-    await call.message.edit_text("🎨 <b>Set Category Emojis</b>\nChoose a category to set its custom emoji ID:", reply_markup=kb, parse_mode='HTML')
+        current = get_setting(f"cat_emoji_{cat}", "").strip()
+        disp = current if current else "Default"
+        cat_icon = get_category_emoji(cat) or "📦"
+        kb.inline_keyboard.append([InlineKeyboardButton(text=f"{cat_icon} {cat} ({disp})", callback_data=f"set_cat_emoji_{cat}")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Back to Admin", callback_data="admin_panel_back")])
+    try:
+        await call.message.edit_text("🎨 <b>Set Category Emojis</b>\nChoose a category to set its custom or standard emoji:", reply_markup=kb, parse_mode='HTML')
+    except Exception:
+        await call.message.answer("🎨 <b>Set Category Emojis</b>\nChoose a category to set its custom or standard emoji:", reply_markup=kb, parse_mode='HTML')
 
 @dp.callback_query(F.data.startswith("set_cat_emoji_"))
 async def admin_set_category_emoji_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
+    await call.answer()
     category = call.data.split("set_cat_emoji_", 1)[1]
     await state.update_data(cat_emoji_category=category)
-    current = get_setting(f"cat_emoji_{category}", "Not set")
-    await call.message.edit_text(f"🎨 Enter the emoji ID for <b>{category}</b>:\nCurrent: {current}\n(Leave empty to reset to default)", reply_markup=admin_back_kb(), parse_mode='HTML')
+    current = get_setting(f"cat_emoji_{category}", "Default")
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Reset to Default Category Emoji", callback_data=f"reset_cat_emoji_{category}")],
+        [InlineKeyboardButton(text="🔙 Back to Categories", callback_data="admin_set_category_emojis")],
+        [InlineKeyboardButton(text="🏠 Admin Panel", callback_data="admin_panel_back")]
+    ])
+    
+    prompt = (
+        f"🎨 <b>Set Emoji for Category: {category}</b>\n\n"
+        f"<b>Current:</b> <code>{current}</code>\n\n"
+        f"👉 <b>Send ANY emoji in chat:</b>\n"
+        f"• Any standard emoji (e.g. 📱, 🤖, 💻, 🔥)\n"
+        f"• Any custom emoji from your Telegram picker\n"
+        f"• Send <code>reset</code> to restore default"
+    )
     await state.set_state(AdminStates.wait_for_category_emoji)
+    try:
+        await call.message.edit_text(prompt, reply_markup=kb, parse_mode='HTML')
+    except Exception:
+        await call.message.answer(prompt, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("reset_cat_emoji_"))
+async def reset_cat_emoji_callback(call: CallbackQuery, state: FSMContext):
+    if not is_admin_user(call.from_user.id): return
+    await state.clear()
+    category = call.data.split("reset_cat_emoji_", 1)[1]
+    db_query("DELETE FROM settings WHERE key=?", (f"cat_emoji_{category}",))
+    await call.answer(f"✅ Reset emoji for {category}!", show_alert=True)
+    await admin_set_category_emojis(call, state)
 
 @dp.message(AdminStates.wait_for_category_emoji)
 async def save_category_emoji(m: Message, state: FSMContext):
     data = await state.get_data()
-    category = data['cat_emoji_category']
-    emoji_id = m.text.strip()
-    if emoji_id == "":
+    category = data.get('cat_emoji_category')
+    if not category:
+        await state.clear()
+        return
+        
+    val, preview = extract_emoji_from_message(m)
+    if not val and val != "":
+        await m.answer(
+            f"❌ Could not detect an emoji.\n\nPlease send any emoji (e.g. 📱, 💻, 🔥), or send <code>reset</code>.",
+            reply_markup=admin_back_kb(),
+            parse_mode='HTML'
+        )
+        return
+        
+    if val == "" or val.lower() in ["reset", "default", "none", "clear", "/reset"]:
         db_query("DELETE FROM settings WHERE key=?", (f"cat_emoji_{category}",))
-        await m.answer(f"✅ Reset emoji for {category} to default.", reply_markup=admin_kb(), parse_mode='HTML')
+        await m.answer(f"✅ Reset emoji for <b>{category}</b> to default.", reply_markup=admin_kb(), parse_mode='HTML')
     else:
-        if not emoji_id.isdigit():
-            await m.answer("❌ Invalid ID! Must be numeric.", reply_markup=admin_kb(), parse_mode='HTML')
-            return
-        set_setting(f"cat_emoji_{category}", emoji_id)
-        await m.answer(f"✅ Emoji set for {category} successfully!", reply_markup=admin_kb(), parse_mode='HTML')
+        set_setting(f"cat_emoji_{category}", val)
+        await m.answer(f"✅ Emoji for <b>{category}</b> successfully updated!\n\nNew Value: <code>{val}</code>", reply_markup=admin_kb(), parse_mode='HTML')
     await state.clear()
 
 @dp.callback_query(F.data == "admin_set_panel_emojis")
 async def admin_set_panel_emojis(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
+    await call.answer()
     panels = db_query("SELECT DISTINCT panel_name FROM products WHERE panel_name != '' ORDER BY panel_name", fetchall=True)
     if not panels:
         await call.message.edit_text("No panel names found in products.", reply_markup=admin_back_kb(), parse_mode='HTML')
@@ -3721,34 +4013,76 @@ async def admin_set_panel_emojis(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     for p in panels:
         panel = p[0]
-        current = get_setting(f"panel_emoji_{panel}", "Not set")
-        kb.inline_keyboard.append([InlineKeyboardButton(text=f"{panel} (ID: {current})", callback_data=f"set_panel_emoji_{panel}", style="primary")])
-    kb.inline_keyboard.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_panel_back", icon_custom_emoji_id=get_emoji_icon("back"), style="danger")])
-    await call.message.edit_text("🖼 <b>Set Panel Emojis</b>\nChoose a panel name to set its custom emoji ID:", reply_markup=kb, parse_mode='HTML')
+        current = get_setting(f"panel_emoji_{panel}", "").strip()
+        disp = current if current else "Default"
+        p_icon = get_panel_emoji(panel) or "⚡"
+        kb.inline_keyboard.append([InlineKeyboardButton(text=f"{p_icon} {panel} ({disp})", callback_data=f"set_panel_emoji_{panel}")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Back to Admin", callback_data="admin_panel_back")])
+    try:
+        await call.message.edit_text("🖼 <b>Set Panel Emojis</b>\nChoose a panel name to set its custom or standard emoji:", reply_markup=kb, parse_mode='HTML')
+    except Exception:
+        await call.message.answer("🖼 <b>Set Panel Emojis</b>\nChoose a panel name to set its custom or standard emoji:", reply_markup=kb, parse_mode='HTML')
 
 @dp.callback_query(F.data.startswith("set_panel_emoji_"))
 async def admin_set_panel_emoji_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
+    await call.answer()
     panel_name = call.data.split("set_panel_emoji_", 1)[1]
     await state.update_data(panel_emoji_name=panel_name)
-    current = get_setting(f"panel_emoji_{panel_name}", "Not set")
-    await call.message.edit_text(f"🎨 Enter the emoji ID for panel <b>{panel_name}</b>:\nCurrent: {current}\n(Leave empty to reset to default)", reply_markup=admin_back_kb(), parse_mode='HTML')
+    current = get_setting(f"panel_emoji_{panel_name}", "Default")
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Reset to Default Panel Emoji", callback_data=f"reset_panel_emoji_{panel_name}")],
+        [InlineKeyboardButton(text="🔙 Back to Panel Emojis", callback_data="admin_set_panel_emojis")],
+        [InlineKeyboardButton(text="🏠 Admin Panel", callback_data="admin_panel_back")]
+    ])
+    
+    prompt = (
+        f"🎨 <b>Set Emoji for Panel: {panel_name}</b>\n\n"
+        f"<b>Current:</b> <code>{current}</code>\n\n"
+        f"👉 <b>Send ANY emoji in chat:</b>\n"
+        f"• Any standard emoji (e.g. ⚡, 🛡, 👑, 🔥)\n"
+        f"• Any custom emoji from your Telegram picker\n"
+        f"• Send <code>reset</code> to restore default"
+    )
     await state.set_state(AdminStates.wait_for_panel_emoji_id)
+    try:
+        await call.message.edit_text(prompt, reply_markup=kb, parse_mode='HTML')
+    except Exception:
+        await call.message.answer(prompt, reply_markup=kb, parse_mode='HTML')
+
+@dp.callback_query(F.data.startswith("reset_panel_emoji_"))
+async def reset_panel_emoji_callback(call: CallbackQuery, state: FSMContext):
+    if not is_admin_user(call.from_user.id): return
+    await state.clear()
+    panel_name = call.data.split("reset_panel_emoji_", 1)[1]
+    db_query("DELETE FROM settings WHERE key=?", (f"panel_emoji_{panel_name}",))
+    await call.answer(f"✅ Reset emoji for panel '{panel_name}'!", show_alert=True)
+    await admin_set_panel_emojis(call)
 
 @dp.message(AdminStates.wait_for_panel_emoji_id)
 async def save_panel_emoji(m: Message, state: FSMContext):
     data = await state.get_data()
-    panel_name = data['panel_emoji_name']
-    emoji_id = m.text.strip()
-    if emoji_id == "":
+    panel_name = data.get('panel_emoji_name')
+    if not panel_name:
+        await state.clear()
+        return
+        
+    val, preview = extract_emoji_from_message(m)
+    if not val and val != "":
+        await m.answer(
+            f"❌ Could not detect an emoji.\n\nPlease send any emoji or send <code>reset</code>.",
+            reply_markup=admin_back_kb(),
+            parse_mode='HTML'
+        )
+        return
+        
+    if val == "" or val.lower() in ["reset", "default", "none", "clear", "/reset"]:
         db_query("DELETE FROM settings WHERE key=?", (f"panel_emoji_{panel_name}",))
-        await m.answer(f"✅ Reset emoji for panel '{panel_name}'.", reply_markup=admin_kb(), parse_mode='HTML')
+        await m.answer(f"✅ Reset emoji for panel '<b>{panel_name}</b>' to default.", reply_markup=admin_kb(), parse_mode='HTML')
     else:
-        if not emoji_id.isdigit():
-            await m.answer("❌ Invalid ID! Must be numeric.", reply_markup=admin_kb(), parse_mode='HTML')
-            return
-        set_setting(f"panel_emoji_{panel_name}", emoji_id)
-        await m.answer(f"✅ Emoji set for panel '{panel_name}'!", reply_markup=admin_kb(), parse_mode='HTML')
+        set_setting(f"panel_emoji_{panel_name}", val)
+        await m.answer(f"✅ Emoji for panel '<b>{panel_name}</b>' updated!\n\nNew Value: <code>{val}</code>", reply_markup=admin_kb(), parse_mode='HTML')
     await state.clear()
 
 # ==============================================================================
@@ -3767,7 +4101,7 @@ def mask_secret(value: str) -> str:
 
 @dp.callback_query(F.data == "admin_api_setup")
 async def admin_api_setup(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not is_admin_user(call.from_user.id):
         return
     reseller_url = get_setting("reseller_api_url", RESELLER_API_URL)
     reseller_key = get_setting("reseller_api_key", "")
@@ -3796,7 +4130,7 @@ async def admin_api_setup(call: CallbackQuery):
 
 @dp.callback_query(F.data == "api_reseller_url")
 async def api_reseller_url_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("🌐 Send the Bantibhaiya <b>Reseller API URL</b>:", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_reseller_api_url)
 
@@ -3812,7 +4146,7 @@ async def api_reseller_url_save(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "api_reseller_key")
 async def api_reseller_key_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("🔑 Send the Bantibhaiya <b>API Key</b>:", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_reseller_api_key)
 
@@ -3826,7 +4160,7 @@ async def api_reseller_key_save(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "api_reseller_master")
 async def api_reseller_master_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("🛡 Send the Bantibhaiya <b>Master Key</b>:", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_reseller_master_key)
 
@@ -3840,7 +4174,7 @@ async def api_reseller_master_save(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "api_gateway_url")
 async def api_gateway_url_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("💳 Send the <b>Payment Gateway API URL</b>:", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_gateway_api_url)
 
@@ -3856,7 +4190,7 @@ async def api_gateway_url_save(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "api_gateway_token")
 async def api_gateway_token_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("🔒 Send the <b>Payment Gateway Bearer Token</b>:", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_gateway_token)
 
@@ -3866,11 +4200,12 @@ async def api_gateway_token_save(m: Message, state: FSMContext):
     if value.lower()=="/cancel":
         await state.clear(); return await m.answer("❌ Cancelled.", reply_markup=admin_kb())
     set_setting("payment_gateway_token", value)
+    set_setting("fampay_api_key", value)
     await state.clear(); await m.answer("✅ Payment gateway token saved.", reply_markup=admin_kb())
 
 @dp.callback_query(F.data == "api_gateway_redirect")
 async def api_gateway_redirect_prompt(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("↪️ Send the <b>Payment Redirect URL</b> (HTTPS recommended):", reply_markup=admin_back_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.wait_for_gateway_redirect)
 
@@ -3886,7 +4221,7 @@ async def api_gateway_redirect_save(m: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_setup_fampay")
 async def setup_fampay_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     current_api = get_setting("fampay_api_key", "") # Fetch current API key for display
     current_upi = get_setting("fampay_upi_id", "") # Fetch current UPI ID for display
     await call.message.edit_text(
@@ -3922,7 +4257,7 @@ async def setup_fampay_upi(m: Message, state: FSMContext):
 # ==============================================================================
 @dp.callback_query(F.data == "admin_setup_binance")
 async def setup_binance_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_admin_user(call.from_user.id): return
     await call.message.edit_text("🪙 <b>CRYPTO NODE INIT: Step 1/3</b>\nInput Master <b>Binance API Key</b>:\n<i>(Type /cancel to halt protocol)</i>", reply_markup=admin_back_kb(), parse_mode='HTML')
     await state.set_state(AdminStates.wait_for_binance_api)
 
@@ -3970,10 +4305,13 @@ def start_render_health_server():
             def log_message(self, format, *args):
                 pass
         def serve():
-            socketserver.TCPServer.allow_reuse_address = True
-            with socketserver.TCPServer(("0.0.0.0", port), RenderHealthHandler) as httpd:
-                logger.info(f"🌐 [Render Web Mode] 24/7 Health check server listening on 0.0.0.0:{port}")
-                httpd.serve_forever()
+            try:
+                socketserver.TCPServer.allow_reuse_address = True
+                with socketserver.TCPServer(("0.0.0.0", port), RenderHealthHandler) as httpd:
+                    logger.info(f"🌐 [Render Web Mode] 24/7 Health check server listening on 0.0.0.0:{port}")
+                    httpd.serve_forever()
+            except Exception as e:
+                logger.info(f"[Render Web Mode] Notice: Health server port {port} already bound or unavailable ({e}). Continuing bot operations.")
         t = threading.Thread(target=serve, daemon=True)
         t.start()
     except Exception as e:

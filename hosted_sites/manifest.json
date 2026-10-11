@@ -1,1 +1,19 @@
-[]
+[
+  {
+    "id": "proj_ei9ygq_muldg08c",
+    "name": "proj_ei9ygq_muldg08c",
+    "sourceType": "web_upload",
+    "senderUsername": "cloud_user",
+    "originalFileName": "index.html",
+    "fileSizeMB": 0.1,
+    "filesCount": 1,
+    "filesList": [
+      "index.html"
+    ],
+    "liveUrl": "http://localhost:3000/sites/proj_ei9ygq_muldg08c/",
+    "previewPath": "/sites/proj_ei9ygq_muldg08c/",
+    "createdAt": "2:06:24 PM",
+    "status": "ONLINE",
+    "description": "Hosted Web Project (1 files)"
+  }
+]
