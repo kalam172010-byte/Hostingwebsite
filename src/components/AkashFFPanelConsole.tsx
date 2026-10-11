@@ -111,13 +111,30 @@ export const AkashFFPanelConsole: React.FC = () => {
   const [broadcastMessage, setBroadcastMessage] = useState<string>('');
   const [broadcastStatus, setBroadcastStatus] = useState<string>('');
 
+  // Payment Gateway Switcher State
+  const [activeGateway, setActiveGateway] = useState<'RENDER_REST_API' | 'FAMPAY_LEGACY'>('RENDER_REST_API');
+  const [renderGatewayApiKey, setRenderGatewayApiKey] = useState('fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe');
+  const [fampayApiKey, setFampayApiKey] = useState('fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e');
+  const [renderGatewayBaseUrl, setRenderGatewayBaseUrl] = useState('https://payment-gateway-87gk.onrender.com');
+  const [isSavingGateway, setIsSavingGateway] = useState(false);
+  const [gatewaySavedMsg, setGatewaySavedMsg] = useState('');
+
+  // Live Test Order State
+  const [testAmount, setTestAmount] = useState('499.00');
+  const [testCustomerName, setTestCustomerName] = useState('Rahul Sharma');
+  const [testCustomerEmail, setTestCustomerEmail] = useState('rahul@example.com');
+  const [testOrderResult, setTestOrderResult] = useState<any>(null);
+  const [isTestingOrder, setIsTestingOrder] = useState(false);
+  const [codeTab, setCodeTab] = useState<'REST_POST' | 'GET_ALIAS'>('REST_POST');
+
   // Fetch all data
   const fetchData = async () => {
     try {
-      const [ovRes, prodRes, userRes] = await Promise.all([
+      const [ovRes, prodRes, userRes, gwRes] = await Promise.all([
         fetch('/api/ff-panel/overview'),
         fetch('/api/ff-panel/products'),
-        fetch('/api/ff-panel/users')
+        fetch('/api/ff-panel/users'),
+        fetch('/api/ff-panel/gateway')
       ]);
 
       if (ovRes.ok) setOverview(await ovRes.json());
@@ -129,10 +146,67 @@ export const AkashFFPanelConsole: React.FC = () => {
         const userData = await userRes.json();
         setUsers(userData.users || []);
       }
+      if (gwRes.ok) {
+        const gwData = await gwRes.json();
+        if (gwData.config) {
+          setActiveGateway(gwData.config.activeGateway || 'RENDER_REST_API');
+          setRenderGatewayApiKey(gwData.config.renderGatewayApiKey || 'fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe');
+          setFampayApiKey(gwData.config.fampayApiKey || 'fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e');
+          setRenderGatewayBaseUrl(gwData.config.renderGatewayBaseUrl || 'https://payment-gateway-87gk.onrender.com');
+        }
+      }
     } catch (e) {
       console.warn('Network sync notice:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveGatewayConfig = async (newType?: 'RENDER_REST_API' | 'FAMPAY_LEGACY') => {
+    setIsSavingGateway(true);
+    try {
+      const targetType = newType || activeGateway;
+      const res = await fetch('/api/ff-panel/gateway', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          activeGateway: targetType,
+          renderGatewayApiKey,
+          fampayApiKey,
+          renderGatewayBaseUrl
+        })
+      });
+      if (res.ok) {
+        if (newType) setActiveGateway(newType);
+        setGatewaySavedMsg('✅ Payment Gateway settings & keys saved! Live python bots updated.');
+        setTimeout(() => setGatewaySavedMsg(''), 4000);
+      }
+    } catch (e: any) {
+      setGatewaySavedMsg(`❌ Save error: ${e.message}`);
+    } finally {
+      setIsSavingGateway(false);
+    }
+  };
+
+  const handleCreateTestOrder = async (method: 'POST' | 'GET') => {
+    setIsTestingOrder(true);
+    try {
+      const res = await fetch('/api/ff-panel/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: Number(testAmount) || 499.00,
+          customer_name: testCustomerName,
+          customer_email: testCustomerEmail,
+          method
+        })
+      });
+      const data = await res.json();
+      setTestOrderResult(data);
+    } catch (e: any) {
+      setTestOrderResult({ error: e.message });
+    } finally {
+      setIsTestingOrder(false);
     }
   };
 
@@ -850,57 +924,278 @@ export const AkashFFPanelConsole: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 3: QR & UPI PAYMENTS */}
+        {/* TAB 3: PAYMENT GATEWAY SWITCHING & INTEGRATION */}
         {activeTab === 'payments' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-slate-900 border border-white/10 p-6 rounded-2xl space-y-4">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <QrCode className="w-5 h-5 text-amber-400" />
-                <span>UPI QR Payment Gateway</span>
-              </h3>
-              <p className="text-xs text-slate-400">
-                FamPay & Instant QR Payment Engine integrated in <span className="text-white font-mono">Main_QR_PAYMENT_ALL_FIXED.py</span>.
-              </p>
-
-              <div className="p-4 rounded-xl bg-slate-950 border border-white/5 space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Payee Name:</span>
-                  <span className="font-bold text-white">AKASH FF PANEL</span>
+          <div className="space-y-6">
+            {/* Gateway Switcher Banner */}
+            <div className="p-6 rounded-2xl bg-gradient-to-r from-slate-900 via-rose-950/40 to-slate-900 border border-rose-500/30 shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Wallet className="w-6 h-6 text-amber-400" />
+                  <h2 className="text-lg font-black text-white tracking-wide">
+                    PAYMENT GATEWAY SWITCHER & API MANAGER
+                  </h2>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border ${
+                    activeGateway === 'RENDER_REST_API'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  }`}>
+                    ACTIVE: {activeGateway === 'RENDER_REST_API' ? '⚡ Render Canonical REST API' : '💳 FamPay Legacy Gateway'}
+                  </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">UPI URI:</span>
-                  <span className="font-mono text-amber-300 text-[11px]">upi://pay?pn=AKASH+FF+PANEL</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Verification:</span>
-                  <span className="text-emerald-400 font-bold">Auto Webhook / Verify.php</span>
-                </div>
+                <p className="text-xs text-slate-400 max-w-3xl">
+                  Switch payment gateways instantly. Active payment gateway credentials are automatically synced across all Python bots, Telegram bots, and web checkout orders in real-time.
+                </p>
               </div>
 
-              <div className="pt-2 text-center">
-                <div className="w-44 h-44 mx-auto bg-white p-3 rounded-2xl flex items-center justify-center shadow-lg shadow-white/5">
-                  <QrCode className="w-36 h-36 text-slate-950" />
-                </div>
-                <span className="text-[11px] text-slate-400 block mt-2">Dynamic Amount UPI QR Code</span>
+              <div className="flex items-center gap-3 shrink-0">
+                <button
+                  onClick={() => handleSaveGatewayConfig('RENDER_REST_API')}
+                  disabled={isSavingGateway}
+                  className={`px-4 py-2.5 rounded-xl font-bold text-xs border transition-all flex items-center gap-2 ${
+                    activeGateway === 'RENDER_REST_API'
+                      ? 'bg-rose-600 text-white border-rose-500 shadow-lg shadow-rose-600/30'
+                      : 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>Use Render REST API</span>
+                </button>
+
+                <button
+                  onClick={() => handleSaveGatewayConfig('FAMPAY_LEGACY')}
+                  disabled={isSavingGateway}
+                  className={`px-4 py-2.5 rounded-xl font-bold text-xs border transition-all flex items-center gap-2 ${
+                    activeGateway === 'FAMPAY_LEGACY'
+                      ? 'bg-amber-600 text-white border-amber-500 shadow-lg shadow-amber-600/30'
+                      : 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700'
+                  }`}
+                >
+                  <QrCode className="w-4 h-4 text-emerald-300" />
+                  <span>Use FamPay Gateway</span>
+                </button>
               </div>
             </div>
 
-            <div className="md:col-span-2 bg-slate-900 border border-white/10 p-6 rounded-2xl space-y-4">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Wallet className="w-5 h-5 text-emerald-400" />
-                <span>Recent Orders & Delivered Keys</span>
-              </h3>
-              <div className="p-4 rounded-xl bg-slate-950/60 border border-white/5 text-xs text-slate-400 space-y-2">
-                <p>
-                  Every time a user scans the QR or uses their wallet to purchase a Free Fire Panel, the bot automatically verifies payment, deducts balance, and delivers the key instantly with download links.
-                </p>
-                <div className="flex items-center gap-2 pt-2">
-                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[10px]">
-                    Instant Delivery Active
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px]">
-                    Admin Notification Active
-                  </span>
+            {gatewaySavedMsg && (
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-semibold text-emerald-300 flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-400" />
+                <span>{gatewaySavedMsg}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Left Column: Payment Gateway API Settings */}
+              <div className="bg-slate-900 border border-white/10 p-6 rounded-2xl space-y-5">
+                <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-white/10 pb-3">
+                  <ShieldCheck className="w-5 h-5 text-rose-400" />
+                  <span>Gateway Credentials & Keys</span>
+                </h3>
+
+                <div className="space-y-4 text-xs font-mono">
+                  <div>
+                    <label className="block text-slate-400 text-[11px] mb-1 font-sans font-semibold">
+                      Render Gateway REST API Key (X-Api-Key):
+                    </label>
+                    <input
+                      type="text"
+                      value={renderGatewayApiKey}
+                      onChange={e => setRenderGatewayApiKey(e.target.value)}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-mono text-amber-300 focus:outline-none focus:border-rose-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 text-[11px] mb-1 font-sans font-semibold">
+                      Render Gateway Base URL:
+                    </label>
+                    <input
+                      type="text"
+                      value={renderGatewayBaseUrl}
+                      onChange={e => setRenderGatewayBaseUrl(e.target.value)}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-300 focus:outline-none focus:border-rose-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 text-[11px] mb-1 font-sans font-semibold">
+                      FamPay Gateway API Key:
+                    </label>
+                    <input
+                      type="text"
+                      value={fampayApiKey}
+                      onChange={e => setFampayApiKey(e.target.value)}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-mono text-emerald-300 focus:outline-none focus:border-rose-500"
+                    />
+                  </div>
+
+                  <button
+                    onClick={() => handleSaveGatewayConfig()}
+                    disabled={isSavingGateway}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold text-xs shadow-lg shadow-rose-600/30 transition-all flex items-center justify-center gap-2 font-sans"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isSavingGateway ? 'animate-spin' : ''}`} />
+                    <span>Save & Apply Gateway Configuration</span>
+                  </button>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-950/80 border border-white/5 space-y-2 text-[11px] text-slate-400 font-sans">
+                  <div className="flex items-center gap-2 text-slate-300 font-semibold">
+                    <AlertCircle className="w-4 h-4 text-amber-400" />
+                    <span>Active Gateway Sync Details</span>
+                  </div>
+                  <p>
+                    When switching payment gateways, all running Python bots receive updated <code className="text-amber-300">X_API_KEY</code>, <code className="text-emerald-300 font-mono">PAYMENT_GATEWAY_URL</code>, and <code className="text-cyan-300 font-mono">PAYMENT_GATEWAY_API_KEY</code> environment variables automatically.
+                  </p>
+                </div>
+              </div>
+
+              {/* Right Column: Integration Code Snippets & cURL Examples */}
+              <div className="bg-slate-900 border border-white/10 p-6 rounded-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-amber-400" />
+                    <span>Integration Endpoints & Examples</span>
+                  </h3>
+
+                  <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-white/10 text-[11px] font-bold">
+                    <button
+                      onClick={() => setCodeTab('REST_POST')}
+                      className={`px-3 py-1 rounded-lg transition-all ${
+                        codeTab === 'REST_POST' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      1. REST API (POST JSON)
+                    </button>
+                    <button
+                      onClick={() => setCodeTab('GET_ALIAS')}
+                      className={`px-3 py-1 rounded-lg transition-all ${
+                        codeTab === 'GET_ALIAS' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      2. Query Alias (GET)
+                    </button>
+                  </div>
+                </div>
+
+                {codeTab === 'REST_POST' ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-xs text-slate-300 font-semibold">
+                      <span># 1. Canonical REST API (POST JSON) — Production Recommended</span>
+                      <button
+                        onClick={() => {
+                          const cmd = `curl -X POST "${renderGatewayBaseUrl}/api/create-order" \\\n  -H "Content-Type: application/json" \\\n  -H "X-Api-Key: ${renderGatewayApiKey}" \\\n  -d '{\n    "amount": ${testAmount},\n    "customer_name": "${testCustomerName}",\n    "customer_email": "${testCustomerEmail}",\n    "redirect_url": "https://yoursite.com/payment-success"\n  }'`;
+                          navigator.clipboard.writeText(cmd);
+                          alert('Copied POST cURL to clipboard!');
+                        }}
+                        className="text-amber-300 hover:text-white flex items-center gap-1 text-[10px] font-mono bg-white/5 px-2 py-1 rounded border border-white/10"
+                      >
+                        <Copy className="w-3 h-3" /> Copy cURL
+                      </button>
+                    </div>
+
+                    <pre className="p-4 rounded-xl bg-slate-950 text-[11px] font-mono text-cyan-300 overflow-x-auto border border-cyan-500/20">
+{`curl -X POST "${renderGatewayBaseUrl}/api/create-order" \\
+  -H "Content-Type: application/json" \\
+  -H "X-Api-Key: ${renderGatewayApiKey}" \\
+  -d '{
+    "amount": ${testAmount},
+    "customer_name": "${testCustomerName}",
+    "customer_email": "${testCustomerEmail}",
+    "redirect_url": "https://yoursite.com/payment-success"
+  }'`}
+                    </pre>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-xs text-slate-300 font-semibold">
+                      <span># 2. Query Alias (GET) — Ideal for quick terminal testing & scripts</span>
+                      <button
+                        onClick={() => {
+                          const cmd = `curl -X GET "${renderGatewayBaseUrl}/api/qr.php?api_key=${renderGatewayApiKey}&amount=${testAmount}&customer_name=${encodeURIComponent(testCustomerName)}"`;
+                          navigator.clipboard.writeText(cmd);
+                          alert('Copied GET cURL to clipboard!');
+                        }}
+                        className="text-amber-300 hover:text-white flex items-center gap-1 text-[10px] font-mono bg-white/5 px-2 py-1 rounded border border-white/10"
+                      >
+                        <Copy className="w-3 h-3" /> Copy cURL
+                      </button>
+                    </div>
+
+                    <pre className="p-4 rounded-xl bg-slate-950 text-[11px] font-mono text-emerald-300 overflow-x-auto border border-emerald-500/20">
+{`curl -X GET "${renderGatewayBaseUrl}/api/qr.php?api_key=${renderGatewayApiKey}&amount=${testAmount}&customer_name=${encodeURIComponent(testCustomerName)}"`}
+                    </pre>
+                  </div>
+                )}
+
+                {/* Live Order Generator Test Form */}
+                <div className="p-4 rounded-2xl bg-slate-950 border border-white/10 space-y-3 pt-4">
+                  <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>Instant Live Gateway Order Test Simulator</span>
+                  </h4>
+
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">Amount (₹):</label>
+                      <input
+                        type="text"
+                        value={testAmount}
+                        onChange={e => setTestAmount(e.target.value)}
+                        className="w-full bg-slate-900 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">Customer Name:</label>
+                      <input
+                        type="text"
+                        value={testCustomerName}
+                        onChange={e => setTestCustomerName(e.target.value)}
+                        className="w-full bg-slate-900 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">Customer Email:</label>
+                      <input
+                        type="text"
+                        value={testCustomerEmail}
+                        onChange={e => setTestCustomerEmail(e.target.value)}
+                        className="w-full bg-slate-900 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      onClick={() => handleCreateTestOrder('POST')}
+                      disabled={isTestingOrder}
+                      className="flex-1 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20"
+                    >
+                      {isTestingOrder ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                      <span>Test POST Order (REST API)</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleCreateTestOrder('GET')}
+                      disabled={isTestingOrder}
+                      className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-xs transition-all border border-cyan-500/30 flex items-center justify-center gap-1.5"
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      <span>Test GET QR Alias</span>
+                    </button>
+                  </div>
+
+                  {testOrderResult && (
+                    <div className="p-3 rounded-xl bg-slate-900 border border-cyan-500/30 text-xs space-y-2 font-mono">
+                      <div className="flex items-center justify-between text-emerald-400 font-bold font-sans">
+                        <span>Order Response ({testOrderResult.method}):</span>
+                        <button onClick={() => setTestOrderResult(null)} className="text-slate-500 hover:text-white">✕</button>
+                      </div>
+                      <pre className="text-[10px] text-slate-300 overflow-x-auto max-h-40">
+                        {JSON.stringify(testOrderResult, null, 2)}
+                      </pre>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

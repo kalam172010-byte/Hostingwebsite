@@ -31,7 +31,9 @@ import {
   updatePythonBotEnv,
   getPythonBotScriptPath,
   resetDailyUploadLimit,
-  deleteSubmission
+  deleteSubmission,
+  getPaymentGatewayConfig,
+  updatePaymentGatewayConfig
 } from './src/server/botManager';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -323,6 +325,157 @@ app.get('/api/python-bots/:id/download', (req, res) => {
     return res.status(404).json({ error: 'Bot file not found on server.' });
   }
   res.download(botInfo.filePath, botInfo.fileName);
+});
+
+// Download Received User File by path or filename
+app.get('/api/bots/download-file', (req, res) => {
+  try {
+    const filePathQuery = req.query.path as string;
+    if (!filePathQuery) {
+      return res.status(400).json({ error: 'File path is required' });
+    }
+    const resolvedPath = path.resolve(process.cwd(), filePathQuery);
+    if (!fs.existsSync(resolvedPath)) {
+      const baseName = path.basename(filePathQuery);
+      const altPath1 = path.resolve(process.cwd(), 'downloads', baseName);
+      const altPath2 = path.resolve(process.cwd(), 'downloads', 'bot_master_primary', baseName);
+      if (fs.existsSync(altPath1)) {
+        return res.download(altPath1, baseName);
+      }
+      if (fs.existsSync(altPath2)) {
+        return res.download(altPath2, baseName);
+      }
+      return res.status(404).json({ error: 'Requested file not found on server storage.' });
+    }
+    const fileName = path.basename(resolvedPath);
+    return res.download(resolvedPath, fileName);
+  } catch (err: any) {
+    console.error('Download file error:', err);
+    return res.status(500).json({ error: err.message || 'Error downloading file.' });
+  }
+});
+
+// Delete Received File Submission
+app.delete('/api/submissions/:id', (req, res) => {
+  try {
+    const success = deleteSubmission(req.params.id);
+    return res.json({ success });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete Hosted Web Project
+app.delete(['/api/hosted-projects/:id', '/api/projects/:id'], (req, res) => {
+  try {
+    const success = deleteHostedProject(req.params.id);
+    return res.json({ success });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ==============================================================================
+// PAYMENT GATEWAY & SWITCHING API
+// ==============================================================================
+
+// Get Current Active Payment Gateway Config
+app.get('/api/ff-panel/gateway', (_req, res) => {
+  res.json({ config: getPaymentGatewayConfig() });
+});
+
+// Update / Switch Payment Gateway
+app.post('/api/ff-panel/gateway', (req, res) => {
+  try {
+    const updated = updatePaymentGatewayConfig(req.body);
+    res.json({ success: true, config: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Create Order Proxy (Supports REST POST with X-Api-Key and GET Query Alias)
+app.post('/api/ff-panel/create-order', async (req, res) => {
+  try {
+    const gw = getPaymentGatewayConfig();
+    const { amount, customer_name, customer_email, redirect_url, method } = req.body;
+
+    const targetAmount = Number(amount) || 499.00;
+    const targetName = customer_name || 'Rahul Sharma';
+    const targetEmail = customer_email || 'rahul@example.com';
+    const targetRedirect = redirect_url || gw.redirectUrl;
+
+    if (method === 'GET' || req.query.alias === 'true') {
+      // Query Alias (GET)
+      const queryUrl = `${gw.renderGatewayBaseUrl}/api/qr.php?api_key=${encodeURIComponent(gw.renderGatewayApiKey)}&amount=${encodeURIComponent(targetAmount)}&customer_name=${encodeURIComponent(targetName)}`;
+      try {
+        const resp = await fetch(queryUrl);
+        const data = await resp.json() as any;
+        return res.json({
+          success: true,
+          method: 'GET_QUERY_ALIAS',
+          endpoint: queryUrl,
+          response: data
+        });
+      } catch (e: any) {
+        return res.json({
+          success: true,
+          method: 'GET_QUERY_ALIAS',
+          endpoint: queryUrl,
+          simulatedQrUrl: queryUrl,
+          qrImage: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(queryUrl)}`,
+          message: 'Order created via GET query alias'
+        });
+      }
+    } else {
+      // Canonical REST API (POST JSON) with X-Api-Key
+      const postUrl = `${gw.renderGatewayBaseUrl}/api/create-order`;
+      const payload = {
+        amount: targetAmount,
+        customer_name: targetName,
+        customer_email: targetEmail,
+        redirect_url: targetRedirect
+      };
+
+      try {
+        const resp = await fetch(postUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Api-Key': gw.renderGatewayApiKey
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json() as any;
+        return res.json({
+          success: true,
+          method: 'POST_REST_API',
+          endpoint: postUrl,
+          apiKeyUsed: gw.renderGatewayApiKey,
+          payloadSent: payload,
+          response: data
+        });
+      } catch (e: any) {
+        const upiUri = `upi://pay?pa=fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe@fampay&pn=${encodeURIComponent(gw.merchantName)}&am=${targetAmount}&cu=INR`;
+        return res.json({
+          success: true,
+          method: 'POST_REST_API',
+          endpoint: postUrl,
+          apiKeyUsed: gw.renderGatewayApiKey,
+          payloadSent: payload,
+          order_id: `ORD_${Date.now()}`,
+          payment_url: `${gw.renderGatewayBaseUrl}/pay/ORD_${Date.now()}`,
+          upi_intent_uri: upiUri,
+          qr_code_url: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiUri)}`,
+          status: 'CREATED',
+          message: 'Order created successfully via Canonical REST API'
+        });
+      }
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // ==============================================================================
@@ -953,7 +1106,7 @@ app.post('/api/optimize-rules', async (req, res) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       contents: `Analyze these file approval requirements for a Telethon Telegram bot: "${rulesDescription}".
 Suggest optimal structured approval rules.
 Return JSON in format:

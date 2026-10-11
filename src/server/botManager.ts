@@ -154,7 +154,70 @@ const hostedSitesManifestPath = path.join(hostedSitesRootDir, 'manifest.json');
 const submissionsManifestPath = path.join(downloadsRootDir, 'manifest.json');
 const dailyUploadsManifestPath = path.join(downloadsRootDir, 'daily_uploads.json');
 const masterBotsManifestPath = path.join(downloadsRootDir, 'master_bots.json');
+const gatewayConfigManifestPath = path.join(downloadsRootDir, 'gateway_config.json');
 const userDailyUploads = new Map<string, number>();
+
+export interface PaymentGatewayConfig {
+  activeGateway: 'RENDER_REST_API' | 'FAMPAY_LEGACY';
+  renderGatewayApiKey: string;
+  renderGatewayBaseUrl: string;
+  fampayApiKey: string;
+  merchantName: string;
+  redirectUrl: string;
+}
+
+let paymentGatewayConfig: PaymentGatewayConfig = {
+  activeGateway: 'RENDER_REST_API',
+  renderGatewayApiKey: 'fam_67c5e10fc423d5ef37aac212a20e55c63d51b7fe',
+  renderGatewayBaseUrl: 'https://payment-gateway-87gk.onrender.com',
+  fampayApiKey: 'fam_a9527c6c2dd4d26ad5223cfc3c4c5fa9289b574e',
+  merchantName: 'AKASH FF PANEL',
+  redirectUrl: 'https://yoursite.com/payment-success'
+};
+
+export function savePaymentGatewayManifest() {
+  try {
+    fs.writeFileSync(gatewayConfigManifestPath, JSON.stringify(paymentGatewayConfig, null, 2), 'utf-8');
+  } catch (_) {}
+}
+
+export function loadPaymentGatewayManifest() {
+  try {
+    if (fs.existsSync(gatewayConfigManifestPath)) {
+      const data = JSON.parse(fs.readFileSync(gatewayConfigManifestPath, 'utf-8'));
+      if (data && typeof data === 'object') {
+        paymentGatewayConfig = { ...paymentGatewayConfig, ...data };
+      }
+    }
+  } catch (_) {}
+}
+
+export function getPaymentGatewayConfig(): PaymentGatewayConfig {
+  loadPaymentGatewayManifest();
+  return paymentGatewayConfig;
+}
+
+export function updatePaymentGatewayConfig(updates: Partial<PaymentGatewayConfig>): PaymentGatewayConfig {
+  paymentGatewayConfig = { ...paymentGatewayConfig, ...updates };
+  savePaymentGatewayManifest();
+
+  // Sync active payment gateway variables across all hosted Python bots
+  hostedPythonBots.forEach(bot => {
+    if (!bot.envVars) bot.envVars = {};
+    bot.envVars.PAYMENT_GATEWAY_TYPE = paymentGatewayConfig.activeGateway;
+    bot.envVars.PAYMENT_GATEWAY_URL = paymentGatewayConfig.renderGatewayBaseUrl;
+    bot.envVars.PAYMENT_GATEWAY_API_KEY = paymentGatewayConfig.activeGateway === 'RENDER_REST_API' 
+      ? paymentGatewayConfig.renderGatewayApiKey 
+      : paymentGatewayConfig.fampayApiKey;
+    bot.envVars.X_API_KEY = paymentGatewayConfig.renderGatewayApiKey;
+    bot.envVars.FAMPAY_API_KEY = paymentGatewayConfig.fampayApiKey;
+    bot.envVars.MERCHANT_NAME = paymentGatewayConfig.merchantName;
+    bot.envVars.REDIRECT_URL = paymentGatewayConfig.redirectUrl;
+  });
+  saveManifests();
+
+  return paymentGatewayConfig;
+}
 
 export function saveDailyUploadsManifest() {
   try {
@@ -300,26 +363,6 @@ export function loadManifests() {
   try {
     // Run automated python runtime check for Render and cloud hosting
     bootstrapPythonEnvironment();
-
-    // Ensure pybot_ff_selling_bot directory has the script and database
-    const ffBotDir = path.join(hostedPythonBotsDir, 'pybot_ff_selling_bot');
-    if (!fs.existsSync(ffBotDir)) {
-      fs.mkdirSync(ffBotDir, { recursive: true });
-    }
-    const targetScript = path.join(ffBotDir, 'FREE_FIRE_SELLING_BOT_UPDATED.py');
-    const sourceScript = path.resolve(process.cwd(), 'downloads/bot_master_primary/FREE_FIRE_SELLING_BOT_UPDATED.py');
-    if (fs.existsSync(sourceScript)) {
-      try {
-        fs.copyFileSync(sourceScript, targetScript);
-      } catch (_) {}
-    }
-    const sourceDb = path.resolve(process.cwd(), 'Cuibcc.db');
-    const targetDb = path.join(ffBotDir, 'Cuibcc.db');
-    if (fs.existsSync(sourceDb) && !fs.existsSync(targetDb)) {
-      try {
-        fs.copyFileSync(sourceDb, targetDb);
-      } catch (_) {}
-    }
 
     if (fs.existsSync(pythonBotsManifestPath)) {
       try {
@@ -489,7 +532,12 @@ export async function deployProjectFromZip(
     botId: meta.botId
   };
 
+  if (meta.originalFileName) {
+    deletedFileNames.delete(meta.originalFileName);
+  }
+
   hostedProjects.unshift(project);
+  saveManifests();
   return project;
 }
 
@@ -529,32 +577,120 @@ export async function deploySingleHtml(
     botId: meta.botId
   };
 
+  if (meta.originalFileName) {
+    deletedFileNames.delete(meta.originalFileName);
+  }
+
   hostedProjects.unshift(project);
+  saveManifests();
   return project;
 }
 
 export function deleteHostedProject(id: string): boolean {
+  let found = false;
+  let removedName = id;
   const idx = hostedProjects.findIndex(p => p.id === id);
-  if (idx === -1) return false;
-  hostedProjects.splice(idx, 1);
-  return true;
+
+  if (idx !== -1) {
+    const removed = hostedProjects.splice(idx, 1)[0];
+    removedName = removed.name;
+    found = true;
+  }
+
+  // Physically delete hosted site folder from disk
+  const targetDir = path.join(hostedSitesRootDir, id);
+  if (fs.existsSync(targetDir)) {
+    try {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+      found = true;
+    } catch (e: any) {
+      console.warn('[Hosted Project Delete Error]', e.message);
+    }
+  }
+
+  saveManifests();
+  addLog('bot_primary', 'WARN', `🗑️ Deleted hosted website "${removedName}" (${id}) from website & server.`);
+  return found;
 }
 
 export function autoDiscoverHostedPythonBots() {
-  // Sync state: prune any bots whose directory no longer exists
+  // Sync state: prune and kill any bots whose directory or entry script file no longer exists
   for (let i = hostedPythonBots.length - 1; i >= 0; i--) {
     const b = hostedPythonBots[i];
     const fullDir = path.join(hostedPythonBotsDir, b.id);
-    if (!fs.existsSync(fullDir)) {
+    const entryPath = path.join(fullDir, b.entryFile || 'bot.py');
+    
+    // Check if directory or entry file was deleted on disk
+    let hasScript = fs.existsSync(fullDir) && fs.existsSync(entryPath);
+    if (!hasScript && fs.existsSync(fullDir)) {
+      const remainingPyFiles = fs.readdirSync(fullDir).filter(f => f.endsWith('.py'));
+      if (remainingPyFiles.length > 0) {
+        b.entryFile = remainingPyFiles[0];
+        hasScript = true;
+      }
+    }
+
+    if (!hasScript) {
       stopPythonBot(b.id);
       hostedPythonBots.splice(i, 1);
+      saveManifests();
     }
+  }
+
+  // Discover and auto-host Python bots from directories in hostedPythonBotsDir
+  try {
+    if (!fs.existsSync(hostedPythonBotsDir)) return;
+    const dirs = fs.readdirSync(hostedPythonBotsDir);
+    for (const d of dirs) {
+      if (d === 'manifest.json' || d.startsWith('.')) continue;
+      const fullDir = path.join(hostedPythonBotsDir, d);
+      try {
+        if (!fs.statSync(fullDir).isDirectory()) continue;
+      } catch (_) { continue; }
+
+      const exists = hostedPythonBots.some(b => b.id === d);
+      if (!exists) {
+        const pyFiles = fs.readdirSync(fullDir).filter(f => f.endsWith('.py'));
+        if (pyFiles.length > 0) {
+          const entry = pyFiles.includes('bot.py') ? 'bot.py' : pyFiles.includes('main.py') ? 'main.py' : pyFiles[0];
+          const newBot: HostedPythonBot = {
+            id: d,
+            name: d.replace(/^pybot_/, '').replace(/_/g, ' '),
+            entryFile: entry,
+            sourceType: 'web_upload',
+            senderUsername: 'cloud_user',
+            originalFileName: entry,
+            fileSizeMB: 0.1,
+            status: 'RUNNING',
+            startedAt: new Date().toLocaleTimeString(),
+            uptimeSeconds: 0,
+            logs: [`[SYSTEM] Auto-discovered python bot directory "${d}"`],
+            description: `Hosted Python bot worker (${entry})`
+          };
+          hostedPythonBots.push(newBot);
+          spawnPythonBotProcess(newBot);
+          saveManifests();
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Auto-discover hosted python bots error]', err);
   }
 }
 
 export function autoDiscoverHostedProjects() {
   try {
     if (!fs.existsSync(hostedSitesRootDir)) return;
+
+    // Prune hosted projects whose directory no longer exists on disk
+    for (let i = hostedProjects.length - 1; i >= 0; i--) {
+      const proj = hostedProjects[i];
+      const fullDir = path.join(hostedSitesRootDir, proj.id);
+      if (!fs.existsSync(fullDir)) {
+        hostedProjects.splice(i, 1);
+      }
+    }
+
     const dirs = fs.readdirSync(hostedSitesRootDir);
     for (const d of dirs) {
       if (d === 'manifest.json' || d.startsWith('.')) continue;
@@ -607,16 +743,32 @@ const SYSTEM_IGNORED_FILES = new Set([
   'Procfile', 'render.yaml', 'requirements.txt', 'get-pip.py', 'Dockerfile',
   '.dockerignore', '.gitignore', 'Cuibcc.db', 'master_bots.json', 'daily_uploads.json',
   'manifest.json', 'server.js', 'server.ts', 'run-server.js', 'index.html', 'package.json',
-  'tsconfig.json', 'vite.config.ts', 'Main_QR_PAYMENT_ALL_FIXED.py', 'Main_QR_PAYMENT_ALL_FIXED-1_FULL_FIXED (1).py'
+  'tsconfig.json', 'vite.config.ts'
 ]);
+
+const deletedFileNames = new Set<string>();
 
 export function autoDiscoverDownloads() {
   try {
+    // Prune liveSubmissions whose files no longer exist on disk
+    for (let i = liveSubmissions.length - 1; i >= 0; i--) {
+      const sub = liveSubmissions[i];
+      if (sub.fileName && deletedFileNames.has(sub.fileName)) {
+        liveSubmissions.splice(i, 1);
+        continue;
+      }
+      const localExists = sub.localFilePath ? fs.existsSync(sub.localFilePath) : false;
+      const downloadedExists = sub.downloadedPath ? fs.existsSync(sub.downloadedPath) : false;
+      if (!localExists && !downloadedExists) {
+        liveSubmissions.splice(i, 1);
+      }
+    }
+
     const scanDir = (dirPath: string) => {
       if (!fs.existsSync(dirPath)) return;
       const entries = fs.readdirSync(dirPath);
       for (const entry of entries) {
-        if (SYSTEM_IGNORED_FILES.has(entry) || entry.endsWith('.json') || entry.endsWith('.pyc') || entry.endsWith('.db')) {
+        if (SYSTEM_IGNORED_FILES.has(entry) || entry.endsWith('.json') || entry.endsWith('.pyc') || entry.endsWith('.db') || deletedFileNames.has(entry)) {
           continue;
         }
 
@@ -682,6 +834,9 @@ export function getLiveSubmissions() {
   autoDiscoverDownloads();
   // Filter out dead paths pointing to unmapped old system directories
   return liveSubmissions.filter(s => {
+    if (s.fileName && deletedFileNames.has(s.fileName)) {
+      return false;
+    }
     if (s.localFilePath && s.localFilePath.startsWith('/app/applet') && !fs.existsSync(s.localFilePath)) {
       // Fix relative path if exists in cwd
       const relName = path.basename(s.localFilePath);
@@ -700,6 +855,9 @@ export function getLiveSubmissions() {
 export function addSubmission(sub: LiveSubmission) {
   // Prevent duplicate insertion with same ID
   if (!liveSubmissions.some(s => s.id === sub.id)) {
+    if (sub.fileName) {
+      deletedFileNames.delete(sub.fileName);
+    }
     liveSubmissions.unshift(sub);
     if (liveSubmissions.length > 500) liveSubmissions.pop();
     saveManifests();
@@ -708,16 +866,49 @@ export function addSubmission(sub: LiveSubmission) {
 }
 
 export function deleteSubmission(id: string): boolean {
-  const idx = liveSubmissions.findIndex(s => s.id === id);
-  if (idx === -1) return false;
-  const removed = liveSubmissions.splice(idx, 1)[0];
+  let found = false;
+  let removedName = id;
 
-  // Physically delete file from disk
-  const pathsToCheck = [removed.localFilePath, removed.downloadedPath].filter(Boolean) as string[];
+  // Find and splice from liveSubmissions
+  const idx = liveSubmissions.findIndex(s => s.id === id || s.fileName === id);
+  let removedSub: LiveSubmission | undefined;
+  if (idx !== -1) {
+    removedSub = liveSubmissions.splice(idx, 1)[0];
+    removedName = removedSub.fileName;
+    found = true;
+  }
+
+  // Also purge any other submissions matching filename or id
+  for (let i = liveSubmissions.length - 1; i >= 0; i--) {
+    const s = liveSubmissions[i];
+    if (s.id === id || (removedSub && s.fileName === removedSub.fileName)) {
+      liveSubmissions.splice(i, 1);
+      found = true;
+    }
+  }
+
+  if (removedName) {
+    deletedFileNames.add(removedName);
+  }
+  deletedFileNames.add(id);
+
+  const pathsToCheck = new Set<string>();
+  if (removedSub) {
+    if (removedSub.localFilePath) pathsToCheck.add(removedSub.localFilePath);
+    if (removedSub.downloadedPath) pathsToCheck.add(removedSub.downloadedPath);
+    if (removedSub.fileName) {
+      pathsToCheck.add(path.join(downloadsRootDir, removedSub.fileName));
+      pathsToCheck.add(path.join(downloadsRootDir, 'bot_master_primary', removedSub.fileName));
+    }
+  }
+  pathsToCheck.add(path.join(downloadsRootDir, id));
+  pathsToCheck.add(path.join(downloadsRootDir, 'bot_master_primary', id));
+
   for (const filePath of pathsToCheck) {
     if (fs.existsSync(filePath)) {
       try {
-        fs.unlinkSync(filePath);
+        fs.rmSync(filePath, { recursive: true, force: true });
+        found = true;
       } catch (e: any) {
         console.warn('[File delete notice]', e.message);
       }
@@ -725,8 +916,8 @@ export function deleteSubmission(id: string): boolean {
   }
 
   saveManifests();
-  addLog(removed.botId || 'bot_primary', 'WARN', `🗑️ Deleted file submission "${removed.fileName}" (${id}) from website & server.`);
-  return true;
+  addLog('bot_primary', 'WARN', `🗑️ Deleted file submission "${removedName}" (${id}) from website & server.`);
+  return found;
 }
 
 export function getActiveBotInfos() {
@@ -810,7 +1001,7 @@ CRITICAL RULES:
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
     });
 
@@ -846,7 +1037,7 @@ export function autoInstallMissingModulesFromCode(code: string, botLogs?: string
     }
   } catch (_) {}
 
-  const importLines = code.match(/^(?:from\s+([a-zA-Z0-9_]+)|import\s+([a-zA-Z0-9_]+))/gm) || [];
+  const importRegex = /(?:^|\n)\s*(?:from|import)\s+([a-zA-Z0-9_]+)/g;
   const standardLibs = new Set([
     'os', 'sys', 'json', 'time', 'datetime', 'math', 'random', 're', 'asyncio',
     'logging', 'sqlite3', 'urllib', 'http', 'subprocess', 'threading', 'collections',
@@ -856,10 +1047,9 @@ export function autoInstallMissingModulesFromCode(code: string, botLogs?: string
   ]);
 
   const detectedPackages = new Set<string>();
-  for (const line of importLines) {
-    const fromMatch = line.match(/^from\s+([a-zA-Z0-9_]+)/);
-    const importMatch = line.match(/^import\s+([a-zA-Z0-9_]+)/);
-    const mod = (fromMatch ? fromMatch[1] : (importMatch ? importMatch[1] : '')).trim();
+  let m;
+  while ((m = importRegex.exec(code)) !== null) {
+    const mod = (m[1] || '').trim();
     if (mod && !standardLibs.has(mod)) {
       const pkg = PACKAGE_ALIAS_MAP[mod] || mod;
       detectedPackages.add(pkg);
@@ -1211,6 +1401,22 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
     }
   });
 
+  // Ensure all python dependencies imported in the script file are pre-installed
+  try {
+    const scriptCode = fs.readFileSync(scriptPath, 'utf-8');
+    autoInstallMissingModulesFromCode(scriptCode, botInfo.logs);
+
+    if (!botInfo.envVars) botInfo.envVars = {};
+    if (!botInfo.envVars.BOT_TOKEN) {
+      const tokenMatch = scriptCode.match(/([0-9]{8,11}:[a-zA-Z0-9_-]{35})/);
+      if (tokenMatch) {
+        botInfo.envVars.BOT_TOKEN = tokenMatch[1];
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Pre-launch check notice]', err.message);
+  }
+
   // Clear any existing pending restart timeout for this bot
   const existingTimer = pendingRestartTimeouts.get(botInfo.id);
   if (existingTimer) {
@@ -1253,6 +1459,7 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
       }
     }
 
+    const gwConfig = getPaymentGatewayConfig();
     const env = {
       ...process.env,
       PATH: `/opt/render/project/src/.venv/bin:/home/render/.local/bin:/root/.local/bin:${process.env.PATH || ''}:/usr/local/bin:/usr/bin:/bin`,
@@ -1262,6 +1469,13 @@ export function spawnPythonBotProcess(botInfo: HostedPythonBot): boolean {
       BOT_ID: botInfo.id,
       SENDER_USERNAME: botInfo.senderUsername || 'anonymous',
       BOT_TOKEN: botInfo.envVars?.BOT_TOKEN || activeMasterToken,
+      PAYMENT_GATEWAY_TYPE: gwConfig.activeGateway,
+      PAYMENT_GATEWAY_URL: gwConfig.renderGatewayBaseUrl,
+      PAYMENT_GATEWAY_API_KEY: gwConfig.activeGateway === 'RENDER_REST_API' ? gwConfig.renderGatewayApiKey : gwConfig.fampayApiKey,
+      X_API_KEY: gwConfig.renderGatewayApiKey,
+      FAMPAY_API_KEY: gwConfig.fampayApiKey,
+      MERCHANT_NAME: gwConfig.merchantName,
+      REDIRECT_URL: gwConfig.redirectUrl,
       ...(botInfo.envVars || {})
     };
 
@@ -1487,6 +1701,11 @@ export async function deployPythonBotFromFile(
     description: meta.description || `Telegram Python bot: ${meta.originalFileName}`,
     botId: meta.botId
   };
+
+  if (meta.originalFileName) {
+    deletedFileNames.delete(meta.originalFileName);
+    deletedFileNames.delete(entryFileName);
+  }
 
   hostedPythonBots.unshift(botInfo);
 
@@ -1724,15 +1943,6 @@ export function getPythonBotScriptPath(id: string): { filePath: string; fileName
     }
   }
 
-  // Robust fallback to primary bot script in downloads directory
-  const primaryFallback = path.resolve(process.cwd(), 'downloads/bot_master_primary/FREE_FIRE_SELLING_BOT_UPDATED.py');
-  if (fs.existsSync(primaryFallback)) {
-    return { filePath: primaryFallback, fileName: 'FREE_FIRE_SELLING_BOT_UPDATED.py' };
-  }
-  const rootFallback = path.resolve(process.cwd(), 'downloads/FREE_FIRE_SELLING_BOT_UPDATED.py');
-  if (fs.existsSync(rootFallback)) {
-    return { filePath: rootFallback, fileName: 'FREE_FIRE_SELLING_BOT_UPDATED.py' };
-  }
   return null;
 }
 
@@ -2155,6 +2365,15 @@ process.on('SIGTERM', async () => {
 setInterval(async () => {
   // 1. Python Worker Processes Check
   hostedPythonBots.forEach(bot => {
+    const fullDir = path.join(hostedPythonBotsDir, bot.id);
+    const entryPath = path.join(fullDir, bot.entryFile || 'bot.py');
+    const fileExists = fs.existsSync(fullDir) && fs.existsSync(entryPath);
+
+    if (!fileExists) {
+      stopPythonBot(bot.id);
+      return;
+    }
+
     if (bot.status !== 'STOPPED') {
       bot.autoRestartEnabled = true;
       bot.status = 'RUNNING';
